@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { deleteLog, updateLog } from './api'
-import type { Log, NutritionData, PersonData } from './types'
+import type { AlbumData, Log, NutritionData, PersonData, SongData, SongStatus } from './types'
 
 interface RowProps {
   log: Log
@@ -9,6 +9,7 @@ interface RowProps {
   onToggle: () => void
   onChange: (log: Log) => void
   onDelete: (id: string) => void
+  onRate: (log: Log) => void
 }
 
 function timeOf(iso: string): string {
@@ -18,30 +19,89 @@ function timeOf(iso: string): string {
     .replace(' ', '')
 }
 
-export function Row({ log, justParsed, expanded, onToggle, onChange, onDelete }: RowProps) {
-  const isFood = log.parsed_type === 'nutrition'
-  const food = log.data as NutritionData
-  const person = log.data as PersonData
+const SONG_STATUS_LABEL: Record<SongStatus, string> = {
+  loved: 'loved',
+  to_revisit: 'revisit',
+  revisited: 'revisited',
+}
 
+function summary(log: Log): string {
+  switch (log.parsed_type) {
+    case 'nutrition':
+      return (log.data as NutritionData).food_name
+    case 'person':
+      return `met ${(log.data as PersonData).name}`
+    case 'album': {
+      const a = log.data as AlbumData
+      return `${a.title}, ${a.artist}`
+    }
+    case 'song': {
+      const s = log.data as SongData
+      if (s.title) return s.artist ? `${s.title}, ${s.artist}` : s.title
+      return s.context ?? 'a song'
+    }
+  }
+}
+
+function rightSide(log: Log, onRate: (log: Log) => void): React.ReactNode {
+  switch (log.parsed_type) {
+    case 'nutrition':
+      return Math.round((log.data as NutritionData).calories)
+    case 'album': {
+      const a = log.data as AlbumData
+      if (a.rating !== null) return a.rating.toFixed(1)
+      return (
+        <button
+          className="rate-link"
+          onClick={(e) => {
+            e.stopPropagation()
+            onRate(log)
+          }}
+        >
+          rate
+        </button>
+      )
+    }
+    case 'song':
+      return <span className="status-label">{SONG_STATUS_LABEL[(log.data as SongData).status]}</span>
+    default:
+      return ''
+  }
+}
+
+export function Row({ log, justParsed, expanded, onToggle, onChange, onDelete, onRate }: RowProps) {
   return (
     <div className={`row-wrap ${expanded ? 'open' : ''}`}>
       <div className={`row ${justParsed ? 'morph' : ''}`} onClick={onToggle}>
         <span className="row-time">{timeOf(log.created_at)}</span>
-        <span className="row-main">{isFood ? food.food_name : `met ${person.name}`}</span>
-        <span className="row-right">{isFood ? Math.round(food.calories) : ''}</span>
+        <span className="row-main">{summary(log)}</span>
+        <span className="row-right">{rightSide(log, onRate)}</span>
       </div>
       <div className="expand">
         <div className="expand-inner">
-          {expanded &&
-            (isFood ? (
-              <FoodEditor log={log} onChange={onChange} onDelete={onDelete} />
-            ) : (
-              <PersonEditor log={log} onChange={onChange} onDelete={onDelete} />
-            ))}
+          {expanded && <Editor log={log} onChange={onChange} onDelete={onDelete} onRate={onRate} />}
         </div>
       </div>
     </div>
   )
+}
+
+function Editor({
+  log,
+  onChange,
+  onDelete,
+  onRate,
+}: EditorProps & { onRate: (log: Log) => void }) {
+  switch (log.parsed_type) {
+    case 'nutrition':
+      return <FoodEditor log={log} onChange={onChange} onDelete={onDelete} />
+    case 'person':
+      return <PersonEditor log={log} onChange={onChange} onDelete={onDelete} />
+    case 'album':
+      return <AlbumEditor log={log} onChange={onChange} onDelete={onDelete} onRate={onRate} />
+    case 'song':
+      return <SongEditor log={log} onChange={onChange} onDelete={onDelete} />
+  }
 }
 
 interface EditorProps {
@@ -184,6 +244,143 @@ function PersonEditor({ log, onChange, onDelete }: EditorProps) {
           value={fields.context}
           onChange={(e) => setFields({ ...fields, context: e.target.value })}
         />
+      </label>
+      <EditorFooter saving={saving} error={error} onSave={submit} onDelete={remove} />
+    </div>
+  )
+}
+
+function AlbumEditor({
+  log,
+  onChange,
+  onDelete,
+  onRate,
+}: EditorProps & { onRate: (log: Log) => void }) {
+  const data = log.data as AlbumData
+  const [fields, setFields] = useState({
+    artist: data.artist,
+    title: data.title,
+    thoughts: data.thoughts ?? '',
+  })
+  const { saving, error, save, remove } = useEditor(log, onChange, onDelete)
+
+  const submit = () =>
+    save({
+      artist: fields.artist,
+      title: fields.title,
+      thoughts: fields.thoughts.trim() || null,
+    })
+
+  const meta =
+    data.rating !== null && data.rating_tier
+      ? `${data.rating_tier} ${data.rating.toFixed(1)}`
+      : 'unrated'
+
+  return (
+    <div className="editor">
+      <div className="editor-grid two">
+        <label>
+          <span>title</span>
+          <input value={fields.title} onChange={(e) => setFields({ ...fields, title: e.target.value })} />
+        </label>
+        <label>
+          <span>artist</span>
+          <input value={fields.artist} onChange={(e) => setFields({ ...fields, artist: e.target.value })} />
+        </label>
+      </div>
+      <label>
+        <span>thoughts</span>
+        <textarea
+          rows={2}
+          value={fields.thoughts}
+          onChange={(e) => setFields({ ...fields, thoughts: e.target.value })}
+        />
+      </label>
+      <div className="editor-footer">
+        <span className="editor-meta">{error || meta}</span>
+        <div className="editor-actions">
+          <button className="action" onClick={() => onRate(log)}>
+            {data.rating !== null ? 're-rank' : 'rate'}
+          </button>
+          <button className="action delete" onClick={remove}>
+            delete
+          </button>
+          <button className="action save" onClick={submit} disabled={saving}>
+            {saving ? 'saving' : 'save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const SONG_STATUSES: SongStatus[] = ['loved', 'to_revisit', 'revisited']
+
+function SongEditor({ log, onChange, onDelete }: EditorProps) {
+  const data = log.data as SongData
+  const [fields, setFields] = useState({
+    title: data.title ?? '',
+    artist: data.artist ?? '',
+    context: data.context ?? '',
+    source: data.source ?? '',
+    thoughts: data.thoughts ?? '',
+  })
+  const [status, setStatus] = useState<SongStatus>(data.status)
+  const { saving, error, save, remove } = useEditor(log, onChange, onDelete)
+
+  const submit = () =>
+    save({
+      title: fields.title.trim() || null,
+      artist: fields.artist.trim() || null,
+      status,
+      context: fields.context.trim() || null,
+      source: fields.source.trim() || null,
+      thoughts: fields.thoughts.trim() || null,
+    })
+
+  return (
+    <div className="editor">
+      <div className="editor-grid two">
+        <label>
+          <span>title</span>
+          <input value={fields.title} onChange={(e) => setFields({ ...fields, title: e.target.value })} />
+        </label>
+        <label>
+          <span>artist</span>
+          <input value={fields.artist} onChange={(e) => setFields({ ...fields, artist: e.target.value })} />
+        </label>
+      </div>
+      <div className="editor-grid two">
+        <label>
+          <span>context</span>
+          <input value={fields.context} onChange={(e) => setFields({ ...fields, context: e.target.value })} />
+        </label>
+        <label>
+          <span>source</span>
+          <input value={fields.source} onChange={(e) => setFields({ ...fields, source: e.target.value })} />
+        </label>
+      </div>
+      <label>
+        <span>thoughts</span>
+        <textarea
+          rows={2}
+          value={fields.thoughts}
+          onChange={(e) => setFields({ ...fields, thoughts: e.target.value })}
+        />
+      </label>
+      <label>
+        <span>status</span>
+        <div className="status-buttons">
+          {SONG_STATUSES.map((s) => (
+            <button
+              key={s}
+              className={`filter ${status === s ? 'active' : ''}`}
+              onClick={() => setStatus(s)}
+            >
+              {SONG_STATUS_LABEL[s]}
+            </button>
+          ))}
+        </div>
       </label>
       <EditorFooter saving={saving} error={error} onSave={submit} onDelete={remove} />
     </div>

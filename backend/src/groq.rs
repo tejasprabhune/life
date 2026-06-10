@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::models::{NutritionData, Parsed, PersonData};
+use crate::models::{AlbumData, NutritionData, Parsed, PersonData, SongData};
 use crate::usda;
 
 const CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
@@ -101,6 +101,48 @@ fn tools() -> Value {
                     "required": ["people"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "log_album",
+                "description": "Log an album the user listened to in full. Never assign a rating here; ratings come from a separate ranking flow.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "artist": { "type": "string", "description": "Album artist" },
+                        "title": { "type": "string", "description": "Album title" },
+                        "thoughts": { "type": "string", "description": "The user's thoughts on the album, if any" }
+                    },
+                    "required": ["artist", "title"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "log_song",
+                "description": "Log a single song: one the user loved, or one heard somewhere they want to catch and revisit later.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": { "type": "string", "description": "Song title, omit when unknown" },
+                        "artist": { "type": "string", "description": "Artist, omit when unknown" },
+                        "status": {
+                            "type": "string",
+                            "enum": ["loved", "to_revisit", "revisited"],
+                            "description": "loved when they express loving it; to_revisit when they want to catch, remember or find a song later; revisited when they came back to one"
+                        },
+                        "thoughts": { "type": "string", "description": "The user's thoughts, if any" },
+                        "context": {
+                            "type": "string",
+                            "description": "Where or how it was heard, plus the song description when the title is unknown, e.g. 'dreamy synth at Blue Bottle'"
+                        },
+                        "source": { "type": "string", "description": "Short source label: radio, cafe, friend, tv, etc." }
+                    },
+                    "required": ["status"]
+                }
+            }
         }
     ])
 }
@@ -116,6 +158,12 @@ For people, extract each name and keep all remaining detail in context. \
 If the entry mentions meeting more than one person, put each person in their own \
 people element: match emails and phone numbers to the right person and repeat the \
 shared context for each. Never combine two people into one element. \
+For music, log_album is for full album listens and log_song for single songs. \
+Song status: phrases like loved, obsessed with, or this song is great mean loved; \
+catch, remember, come back to, find this later, heard at, or playing at mean \
+to_revisit; came back to or finally listened again means revisited. \
+When the user gives only a vague description and no song title, leave title out \
+and put the description with the location in context. \
 Always call at least one tool.";
 
 async fn chat(http: &reqwest::Client, api_key: &str, raw_text: &str) -> Result<Vec<(String, Value)>> {
@@ -304,6 +352,28 @@ async fn parse_call(
                     }))
                 })
                 .collect()
+        }
+        "log_album" => Ok(vec![Parsed::Album(AlbumData {
+            artist: as_str(&args, "artist")?,
+            title: as_str(&args, "title")?,
+            thoughts: opt_str(&args, "thoughts"),
+            rating: None,
+            rating_tier: None,
+            rank_position: None,
+        })]),
+        "log_song" => {
+            let status = as_str(&args, "status")?;
+            if !matches!(status.as_str(), "loved" | "to_revisit" | "revisited") {
+                bail!("unexpected song status {status}");
+            }
+            Ok(vec![Parsed::Song(SongData {
+                title: opt_str(&args, "title"),
+                artist: opt_str(&args, "artist"),
+                status,
+                thoughts: opt_str(&args, "thoughts"),
+                context: opt_str(&args, "context"),
+                source: opt_str(&args, "source"),
+            })])
         }
         other => bail!("unexpected tool call {other}"),
     }

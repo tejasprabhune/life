@@ -2,7 +2,7 @@ use std::env;
 use std::time::Duration;
 
 use axum::http::{HeaderValue, Method};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -11,6 +11,7 @@ use tower_http::trace::TraceLayer;
 
 mod groq;
 mod models;
+mod music;
 mod routes;
 mod usda;
 
@@ -70,6 +71,9 @@ async fn main() -> anyhow::Result<()> {
                 .patch(routes::update_log)
                 .delete(routes::delete_log),
         )
+        .route("/api/albums", get(music::list_albums))
+        .route("/api/albums/{id}/rank", post(music::rank_album))
+        .route("/api/songs", get(music::list_songs))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

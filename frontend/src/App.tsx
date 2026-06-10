@@ -3,6 +3,8 @@ import { createLog, listLogs } from './api'
 import type { Category, Log, PendingLog } from './types'
 import { Row } from './Row'
 import { Guide } from './Guide'
+import { Music } from './Music'
+import { RateModal } from './RateModal'
 
 function localDateStr(d: Date): string {
   const y = d.getFullYear()
@@ -40,11 +42,19 @@ const FILTERS: { value: Category; label: string }[] = [
   { value: 'all', label: 'all' },
   { value: 'nutrition', label: 'food' },
   { value: 'person', label: 'people' },
+  { value: 'music', label: 'music' },
 ]
+
+function matches(log: Log, category: Category): boolean {
+  if (category === 'all') return true
+  if (category === 'music') return log.parsed_type === 'album' || log.parsed_type === 'song'
+  return log.parsed_type === category
+}
 
 export default function App() {
   const route = useHashRoute()
   if (route.startsWith('#/guide')) return <Guide />
+  if (route.startsWith('#/music')) return <Music />
   return <Home />
 }
 
@@ -55,6 +65,7 @@ function Home() {
   const [pendings, setPendings] = useState<PendingLog[]>([])
   const [justParsed, setJustParsed] = useState<Set<string>>(new Set())
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [rateAlbum, setRateAlbum] = useState<Log | null>(null)
   const [text, setText] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const today = localDateStr(new Date())
@@ -111,7 +122,7 @@ function Home() {
     void submit(value)
   }
 
-  const visible = category === 'all' ? logs : logs.filter((l) => l.parsed_type === category)
+  const visible = logs.filter((l) => matches(l, category))
   const totalCals = logs
     .filter((l) => l.parsed_type === 'nutrition')
     .reduce((sum, l) => sum + (Number((l.data as { calories?: number }).calories) || 0), 0)
@@ -120,9 +131,14 @@ function Home() {
     <div className="app">
       <header>
         <h1 className="brand">life</h1>
-        <a className="guide-link" href="#/guide">
-          guide
-        </a>
+        <nav className="header-nav">
+          <a className="guide-link" href="#/music">
+            music
+          </a>
+          <a className="guide-link" href="#/guide">
+            guide
+          </a>
+        </nav>
       </header>
 
       <input
@@ -209,12 +225,23 @@ function Home() {
               setLogs((l) => l.map((x) => (x.id === updated.id ? updated : x)))
             }
             onDelete={(id) => setLogs((l) => l.filter((x) => x.id !== id))}
+            onRate={(album) => setRateAlbum(album)}
           />
         ))}
         {visible.length === 0 && pendings.length === 0 && (
           <div className="empty">nothing logged</div>
         )}
       </main>
+
+      {rateAlbum && (
+        <RateModal
+          album={rateAlbum}
+          onClose={(rated) => {
+            setRateAlbum(null)
+            if (rated) void refresh(date)
+          }}
+        />
+      )}
     </div>
   )
 }

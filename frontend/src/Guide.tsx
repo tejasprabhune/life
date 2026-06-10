@@ -50,6 +50,26 @@ export function Guide() {
       </section>
 
       <section>
+        <h2>music</h2>
+        <p>
+          Log an album after a full listen, or a single song. Songs heard in public with no
+          known title go into a revisit queue; describe what you heard and where. Albums get
+          rated by comparison, not numbers: hit <em>rate</em> on an album row, pick a tier,
+          then answer a few this-or-that matchups. The 0 to 10 score comes from where the
+          album lands among everything else you've ranked.
+        </p>
+        <ul>
+          <li>listened to Blonde by Frank Ocean, loved the back half</li>
+          <li>obsessed with Idioteque by Radiohead</li>
+          <li>catch that dreamy synth song playing at the cafe right now</li>
+        </ul>
+        <p className="schema">
+          album fields: title, artist, thoughts, rating. song fields: title, artist, status,
+          context, source, thoughts
+        </p>
+      </section>
+
+      <section>
         <h2>tips</h2>
         <ul>
           <li>One thing per entry parses best. Log a meal as separate items for cleaner macros.</li>

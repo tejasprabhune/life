@@ -87,8 +87,10 @@ pub async fn list_logs(
     let end = start + Duration::days(1);
 
     let category = query.category.as_deref().unwrap_or("all");
-    if !matches!(category, "all" | "nutrition" | "person") {
-        return Err(AppError::BadRequest("category must be nutrition, person or all".into()));
+    if !matches!(category, "all" | "nutrition" | "person" | "album" | "song") {
+        return Err(AppError::BadRequest(
+            "category must be nutrition, person, album, song or all".into(),
+        ));
     }
 
     let logs: Vec<Log> = sqlx::query_as(&format!(

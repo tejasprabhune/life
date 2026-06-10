@@ -1,4 +1,4 @@
-import type { Category, Log } from './types'
+import type { AlbumGroups, Category, Log, RankComparison, RankResponse, Tier } from './types'
 
 const API = import.meta.env.VITE_API_URL ?? 'https://tejas-life-api.fly.dev'
 
@@ -32,6 +32,29 @@ export async function listLogs(date: string, category: Category): Promise<Log[]>
     tz_offset_min: String(new Date().getTimezoneOffset()),
   })
   const res = await fetch(`${API}/api/logs?${params}`)
+  return (await check(res)).json()
+}
+
+export async function listAlbums(): Promise<AlbumGroups> {
+  const res = await fetch(`${API}/api/albums`)
+  return (await check(res)).json()
+}
+
+export async function listSongs(status: string): Promise<Log[]> {
+  const res = await fetch(`${API}/api/songs?status=${status}`)
+  return (await check(res)).json()
+}
+
+export async function rankAlbum(
+  id: string,
+  tier: Tier,
+  comparisons: RankComparison[],
+): Promise<RankResponse> {
+  const res = await fetch(`${API}/api/albums/${id}/rank`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tier, comparisons }),
+  })
   return (await check(res)).json()
 }
 

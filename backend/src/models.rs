@@ -50,9 +50,31 @@ pub struct PersonData {
     pub last_contacted: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AlbumData {
+    pub artist: String,
+    pub title: String,
+    pub thoughts: Option<String>,
+    pub rating: Option<f64>,
+    pub rating_tier: Option<String>,
+    pub rank_position: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SongData {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub status: String,
+    pub thoughts: Option<String>,
+    pub context: Option<String>,
+    pub source: Option<String>,
+}
+
 pub enum Parsed {
     Nutrition(NutritionData),
     Person(PersonData),
+    Album(AlbumData),
+    Song(SongData),
 }
 
 impl Parsed {
@@ -60,6 +82,8 @@ impl Parsed {
         match self {
             Parsed::Nutrition(_) => "nutrition",
             Parsed::Person(_) => "person",
+            Parsed::Album(_) => "album",
+            Parsed::Song(_) => "song",
         }
     }
 
@@ -67,6 +91,8 @@ impl Parsed {
         match self {
             Parsed::Nutrition(n) => serde_json::to_value(n).unwrap(),
             Parsed::Person(p) => serde_json::to_value(p).unwrap(),
+            Parsed::Album(a) => serde_json::to_value(a).unwrap(),
+            Parsed::Song(s) => serde_json::to_value(s).unwrap(),
         }
     }
 }

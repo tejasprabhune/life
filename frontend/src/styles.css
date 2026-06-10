@@ -364,6 +364,193 @@ header {
   font-size: 15px;
 }
 
+.header-nav {
+  display: flex;
+  gap: 18px;
+}
+
+.rate-link {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.status-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.status-buttons {
+  display: flex;
+  gap: 14px;
+  padding-top: 4px;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 20, 20, 0.32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 10;
+  animation: overlay-in 160ms ease both;
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal {
+  background: var(--bg);
+  border: 2px solid var(--ink);
+  width: 100%;
+  max-width: 400px;
+  padding: 28px;
+}
+
+.modal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: card-in 200ms ease both;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.modal-album {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-question {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.tier-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tier-btn {
+  text-align: left;
+  font-size: 17px;
+  font-weight: 500;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.tier-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.versus {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.versus-btn {
+  text-align: left;
+  padding: 14px;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: border-color 120ms ease;
+}
+
+.versus-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.versus-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.versus-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.versus-artist {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.modal-card.result {
+  align-items: center;
+  text-align: center;
+  padding: 12px 0;
+}
+
+.modal-rating {
+  font-family: 'mencken-std-text', serif;
+  font-style: italic;
+  font-size: 56px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.modal-error {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.music-section {
+  margin-bottom: 36px;
+}
+
+.section-title {
+  font-family: 'mencken-std-text', serif;
+  font-weight: 400;
+  font-style: italic;
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.tier-group {
+  margin-bottom: 18px;
+}
+
+.tier-label {
+  display: block;
+  font-size: 12px;
+  color: var(--faint);
+  padding: 10px 0 2px;
+}
+
+.music-row {
+  border-bottom: 1px solid var(--line);
+}
+
+.row-sub {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 14px;
+}
+
 .guide section {
   margin-bottom: 32px;
 }
