@@ -1,9 +1,12 @@
 use std::env;
 use std::time::Duration;
 
-use axum::http::{HeaderValue, Method};
+use axum::extract::{Request, State};
+use axum::http::{header, HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::Router;
+use axum::{Json, Router};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use tower_http::cors::CorsLayer;
@@ -21,6 +24,24 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub groq_key: String,
     pub usda_key: String,
+    pub auth_token: String,
+}
+
+async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let provided = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+
+    if provided != Some(state.auth_token.as_str()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "unauthorized" })),
+        )
+            .into_response();
+    }
+    next.run(req).await
 }
 
 #[tokio::main]
@@ -36,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let database_url = env::var("DATABASE_URL")?;
     let groq_key = env::var("GROQ_API_KEY")?;
     let usda_key = env::var("USDA_API_KEY").unwrap_or_else(|_| "DEMO_KEY".into());
+    let auth_token = env::var("AUTH_TOKEN")?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -58,12 +80,11 @@ async fn main() -> anyhow::Result<()> {
     let cors = CorsLayer::new()
         .allow_origin(allowed_origins)
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        .allow_headers([axum::http::header::CONTENT_TYPE]);
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
-    let state = AppState { pool, http, groq_key, usda_key };
+    let state = AppState { pool, http, groq_key, usda_key, auth_token };
 
-    let app = Router::new()
-        .route("/health", get(routes::health))
+    let api = Router::new()
         .route("/api/logs", get(routes::list_logs).post(routes::create_log))
         .route(
             "/api/logs/{id}",
@@ -74,6 +95,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/albums", get(music::list_albums))
         .route("/api/albums/{id}/rank", post(music::rank_album))
         .route("/api/songs", get(music::list_songs))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
+
+    let app = Router::new()
+        .route("/health", get(routes::health))
+        .merge(api)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

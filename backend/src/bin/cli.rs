@@ -2,7 +2,9 @@ use std::env;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
     let api = env::var("LIFE_API_URL").unwrap_or_else(|_| "http://localhost:8080".into());
+    let token = env::var("AUTH_TOKEN").unwrap_or_default();
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
         eprintln!("usage: life-cli <text to log>");
@@ -17,7 +19,14 @@ async fn main() -> anyhow::Result<()> {
         if let Some(date) = args.get(1) {
             url = format!("{url}?date={date}");
         }
-        let logs: serde_json::Value = http.get(&url).send().await?.error_for_status()?.json().await?;
+        let logs: serde_json::Value = http
+            .get(&url)
+            .bearer_auth(&token)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
         println!("{}", serde_json::to_string_pretty(&logs)?);
         return Ok(());
     }
@@ -26,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let started = std::time::Instant::now();
     let resp = http
         .post(format!("{api}/api/logs"))
+        .bearer_auth(&token)
         .json(&serde_json::json!({ "raw_text": text }))
         .send()
         .await?;

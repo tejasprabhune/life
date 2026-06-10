@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createLog, listLogs } from './api'
+import { createLog, getToken, listLogs, setToken } from './api'
 import type { Category, Log, PendingLog } from './types'
 import { Row } from './Row'
 import { Guide } from './Guide'
@@ -53,9 +53,45 @@ function matches(log: Log, category: Category): boolean {
 
 export default function App() {
   const route = useHashRoute()
+  const [authed, setAuthed] = useState(() => getToken() !== null)
+
+  useEffect(() => {
+    const onUnauthorized = () => setAuthed(false)
+    window.addEventListener('life-unauthorized', onUnauthorized)
+    return () => window.removeEventListener('life-unauthorized', onUnauthorized)
+  }, [])
+
+  if (!authed) return <Gate onUnlock={() => setAuthed(true)} />
   if (route.startsWith('#/guide')) return <Guide />
   if (route.startsWith('#/music')) return <Music />
   return <Home />
+}
+
+function Gate({ onUnlock }: { onUnlock: () => void }) {
+  const [value, setValue] = useState('')
+
+  const submit = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || !value.trim()) return
+    setToken(value.trim())
+    onUnlock()
+  }
+
+  return (
+    <div className="app">
+      <header>
+        <h1 className="brand">life</h1>
+      </header>
+      <input
+        className="entry-input"
+        type="password"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={submit}
+        placeholder="password"
+        autoFocus
+      />
+    </div>
+  )
 }
 
 function Home() {
