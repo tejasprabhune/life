@@ -43,6 +43,18 @@ function summary(log: Log): string {
   }
 }
 
+function badge(log: Log): { label: string; kind: string } {
+  switch (log.parsed_type) {
+    case 'nutrition':
+      return { label: 'food', kind: 'food' }
+    case 'person':
+      return { label: 'people', kind: 'people' }
+    case 'album':
+    case 'song':
+      return { label: 'music', kind: 'music' }
+  }
+}
+
 function rightSide(log: Log, onRate: (log: Log) => void): React.ReactNode {
   switch (log.parsed_type) {
     case 'nutrition':
@@ -74,6 +86,7 @@ export function Row({ log, justParsed, expanded, onToggle, onChange, onDelete, o
     <div className={`row-wrap ${expanded ? 'open' : ''}`}>
       <div className={`row ${justParsed ? 'morph' : ''}`} onClick={onToggle}>
         <span className="row-time">{timeOf(log.created_at)}</span>
+        <span className={`badge ${badge(log).kind}`}>{badge(log).label}</span>
         <span className="row-main">{summary(log)}</span>
         <span className="row-right">{rightSide(log, onRate)}</span>
       </div>

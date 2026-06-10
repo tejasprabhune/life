@@ -5,6 +5,9 @@
   --line: #e8e8e4;
   --accent: #1f9d4d;
   --bg: #fcfcfa;
+  --food: #1f9d4d;
+  --people: #2563c4;
+  --music: #7c3aed;
 }
 
 * {
@@ -188,6 +191,30 @@ header {
   flex: 1;
   font-size: 17px;
   font-weight: 500;
+}
+
+.badge {
+  font-family: 'calling-code', monospace;
+  font-weight: 400;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--bg);
+  padding: 3px 6px 2px;
+  align-self: center;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+.badge.food {
+  background: var(--food);
+}
+
+.badge.people {
+  background: var(--people);
+}
+
+.badge.music {
+  background: var(--music);
 }
 
 .row-right {
