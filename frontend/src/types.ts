@@ -36,12 +36,43 @@ export interface SongData {
   source: string | null
 }
 
+export interface WorkoutSet {
+  weight: number | null
+  reps: number | null
+  rir: number | null
+  rest_s: number | null
+  unit: string | null
+}
+
+export interface WorkoutExercise {
+  exercise_id: number
+  name: string
+  sets: WorkoutSet[]
+}
+
+export interface WorkoutData {
+  wger_session_id: number
+  date: string
+  notes: string | null
+  note: string | null
+  impression: string | null
+  duration_min: number | null
+  exercises: WorkoutExercise[]
+  total_sets: number
+  total_volume: number | null
+}
+
 export interface Log {
   id: string
   created_at: string
   raw_input: string
-  parsed_type: 'nutrition' | 'person' | 'album' | 'song'
-  data: NutritionData | PersonData | AlbumData | SongData
+  parsed_type: 'nutrition' | 'person' | 'album' | 'song' | 'workout'
+  data: NutritionData | PersonData | AlbumData | SongData | WorkoutData
+}
+
+export interface CreateResponse {
+  logs: Log[]
+  notice: string | null
 }
 
 export type Tier = 'loved' | 'fine' | 'disliked'
@@ -78,4 +109,4 @@ export type Entry =
   | { kind: 'log'; log: Log; justParsed: boolean }
   | { kind: 'pending'; pending: PendingLog }
 
-export type Category = 'all' | 'nutrition' | 'person' | 'music'
+export type Category = 'all' | 'nutrition' | 'person' | 'music' | 'workout'

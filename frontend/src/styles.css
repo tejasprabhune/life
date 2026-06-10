@@ -8,6 +8,7 @@
   --food: #1f9d4d;
   --people: #2563c4;
   --music: #7c3aed;
+  --gym: #d97706;
 }
 
 * {
@@ -215,6 +216,55 @@ header {
 
 .badge.music {
   background: var(--music);
+}
+
+.badge.gym {
+  background: var(--gym);
+}
+
+.notice {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 15px;
+  animation: row-in 200ms ease both;
+}
+
+.workout-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workout-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.workout-notes {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.workout-exercise {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.workout-exercise-name {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.workout-sets {
+  font-family: 'calling-code', monospace;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .row-right {

@@ -5,8 +5,8 @@ use axum::Json;
 use chrono::{Duration, NaiveDate, TimeZone, Utc};
 use uuid::Uuid;
 
-use crate::models::{CreateLog, ListQuery, Log, UpdateLog};
-use crate::{groq, AppState};
+use crate::models::{Action, CreateLog, ListQuery, Log, UpdateLog};
+use crate::{groq, wger, AppState};
 
 pub enum AppError {
     NotFound,
@@ -36,34 +36,116 @@ impl IntoResponse for AppError {
 
 const LOG_COLUMNS: &str = "id, created_at, raw_input, parsed_type, data";
 
+#[derive(serde::Serialize)]
+pub struct CreateResponse {
+    pub logs: Vec<Log>,
+    pub notice: Option<String>,
+}
+
+async fn insert_log(state: &AppState, raw: &str, parsed_type: &str, data: serde_json::Value) -> Result<Log, AppError> {
+    let log: Log = sqlx::query_as(
+        "INSERT INTO logs (raw_input, parsed_type, data) VALUES ($1, $2, $3) \
+         RETURNING id, created_at, raw_input, parsed_type, data",
+    )
+    .bind(raw)
+    .bind(parsed_type)
+    .bind(data)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(log)
+}
+
+/// Insert the workout, or update the existing entry for the same wger
+/// session so saying "worked out" twice does not duplicate it.
+async fn upsert_workout(
+    state: &AppState,
+    raw: &str,
+    data: &crate::models::WorkoutData,
+) -> Result<Log, AppError> {
+    let existing: Option<Log> = sqlx::query_as(
+        "SELECT id, created_at, raw_input, parsed_type, data FROM logs \
+         WHERE parsed_type = 'workout' AND deleted_at IS NULL \
+         AND (data->>'wger_session_id')::bigint = $1",
+    )
+    .bind(data.wger_session_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let payload = serde_json::to_value(data).unwrap();
+    match existing {
+        Some(log) => {
+            // Keep an earlier user note when the re-sync does not bring one.
+            let mut payload = payload;
+            if payload.get("note").map(|n| n.is_null()).unwrap_or(true) {
+                if let Some(old) = log.data.get("note").filter(|n| !n.is_null()) {
+                    payload["note"] = old.clone();
+                }
+            }
+            let updated: Log = sqlx::query_as(
+                "UPDATE logs SET data = $2 WHERE id = $1 \
+                 RETURNING id, created_at, raw_input, parsed_type, data",
+            )
+            .bind(log.id)
+            .bind(payload)
+            .fetch_one(&state.pool)
+            .await?;
+            Ok(updated)
+        }
+        None => insert_log(state, raw, "workout", payload).await,
+    }
+}
+
 pub async fn create_log(
     State(state): State<AppState>,
     Json(body): Json<CreateLog>,
-) -> Result<Json<Vec<Log>>, AppError> {
+) -> Result<Json<CreateResponse>, AppError> {
     let raw = body.raw_text.trim();
     if raw.is_empty() {
         return Err(AppError::BadRequest("raw_text is empty".into()));
     }
+    let tz_offset = body.tz_offset_min.unwrap_or(0);
 
-    let parsed = groq::parse(&state.http, &state.groq_key, &state.usda_key, raw).await?;
+    let actions = groq::parse(&state.http, &state.groq_key, &state.usda_key, raw).await?;
 
-    let mut tx = state.pool.begin().await?;
-    let mut logs = Vec::with_capacity(parsed.len());
-    for entry in &parsed {
-        let log: Log = sqlx::query_as(
-            "INSERT INTO logs (raw_input, parsed_type, data) VALUES ($1, $2, $3) \
-             RETURNING id, created_at, raw_input, parsed_type, data",
-        )
-        .bind(raw)
-        .bind(entry.type_name())
-        .bind(entry.to_json())
-        .fetch_one(&mut *tx)
-        .await?;
-        logs.push(log);
+    let mut logs = Vec::with_capacity(actions.len());
+    let mut notices = Vec::new();
+    for action in actions {
+        match action {
+            Action::Entry(entry) => {
+                logs.push(insert_log(&state, raw, entry.type_name(), entry.to_json()).await?);
+            }
+            Action::Workout { note, allow_not_today } => {
+                let Some(wger_key) = state.wger_key.as_deref() else {
+                    notices.push("wger is not configured.".to_string());
+                    continue;
+                };
+                match wger::sync(&state.http, wger_key, tz_offset, note, allow_not_today).await {
+                    Ok(wger::Outcome::Synced(data)) => {
+                        logs.push(upsert_workout(&state, raw, &data).await?);
+                    }
+                    Ok(wger::Outcome::Notice(msg)) => notices.push(msg),
+                    Err(e) => {
+                        tracing::warn!("wger sync failed: {e:#}");
+                        notices.push("Could not reach wger, try again.".to_string());
+                    }
+                }
+            }
+        }
     }
-    tx.commit().await?;
 
-    Ok(Json(logs))
+    let notice = (!notices.is_empty()).then(|| notices.join(" "));
+    Ok(Json(CreateResponse { logs, notice }))
+}
+
+pub async fn list_workouts(State(state): State<AppState>) -> Result<Json<Vec<Log>>, AppError> {
+    let workouts: Vec<Log> = sqlx::query_as(&format!(
+        "SELECT {LOG_COLUMNS} FROM logs \
+         WHERE parsed_type = 'workout' AND deleted_at IS NULL \
+         ORDER BY data->>'date' DESC, created_at DESC"
+    ))
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(workouts))
 }
 
 pub async fn list_logs(

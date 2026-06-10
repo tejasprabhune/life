@@ -1,4 +1,12 @@
-import type { AlbumGroups, Category, Log, RankComparison, RankResponse, Tier } from './types'
+import type {
+  AlbumGroups,
+  Category,
+  CreateResponse,
+  Log,
+  RankComparison,
+  RankResponse,
+  Tier,
+} from './types'
 
 const API = import.meta.env.VITE_API_URL ?? 'https://tejas-life-api.fly.dev'
 const TOKEN_KEY = 'life_token'
@@ -39,12 +47,20 @@ async function check(res: Response): Promise<Response> {
   return res
 }
 
-export async function createLog(rawText: string): Promise<Log[]> {
+export async function createLog(rawText: string): Promise<CreateResponse> {
   const res = await fetch(`${API}/api/logs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ raw_text: rawText }),
+    body: JSON.stringify({
+      raw_text: rawText,
+      tz_offset_min: new Date().getTimezoneOffset(),
+    }),
   })
+  return (await check(res)).json()
+}
+
+export async function listWorkouts(): Promise<Log[]> {
+  const res = await fetch(`${API}/api/workouts`, { headers: authHeaders() })
   return (await check(res)).json()
 }
 

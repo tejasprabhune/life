@@ -70,6 +70,24 @@ export function Guide() {
       </section>
 
       <section>
+        <h2>gym</h2>
+        <p>
+          Log the session itself in wger during the workout. Then say "worked out" here and
+          the latest wger session is pulled in with its exercises, sets and volume. Only
+          sessions from today are logged unless you explicitly ask otherwise. Set data is
+          owned by wger; the note field is editable here.
+        </p>
+        <ul>
+          <li>worked out</li>
+          <li>worked out, felt strong on squats</li>
+          <li>log my last gym session even though it was yesterday</li>
+        </ul>
+        <p className="schema">
+          fields: date, exercises and sets (read-only), impression, duration, note
+        </p>
+      </section>
+
+      <section>
         <h2>tips</h2>
         <ul>
           <li>One thing per entry parses best. Log a meal as separate items for cleaner macros.</li>

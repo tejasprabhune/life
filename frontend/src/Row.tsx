@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { deleteLog, updateLog } from './api'
-import type { AlbumData, Log, NutritionData, PersonData, SongData, SongStatus } from './types'
+import type {
+  AlbumData,
+  Log,
+  NutritionData,
+  PersonData,
+  SongData,
+  SongStatus,
+  WorkoutData,
+} from './types'
 
 interface RowProps {
   log: Log
@@ -25,6 +33,21 @@ const SONG_STATUS_LABEL: Record<SongStatus, string> = {
   revisited: 'revisited',
 }
 
+export function workoutSummary(data: WorkoutData): string {
+  if (data.exercises.length === 0) return 'workout, no sets logged'
+  const parts = [
+    `${data.exercises.length} exercise${data.exercises.length === 1 ? '' : 's'}`,
+    `${data.total_sets} sets`,
+  ]
+  return `workout, ${parts.join(', ')}`
+}
+
+export function workoutVolume(data: WorkoutData): string {
+  if (data.total_volume === null) return ''
+  const unit = data.exercises.flatMap((e) => e.sets).find((s) => s.unit)?.unit ?? 'kg'
+  return `${data.total_volume.toLocaleString()} ${unit}`
+}
+
 function summary(log: Log): string {
   switch (log.parsed_type) {
     case 'nutrition':
@@ -40,6 +63,8 @@ function summary(log: Log): string {
       if (s.title) return s.artist ? `${s.title}, ${s.artist}` : s.title
       return s.context ?? 'a song'
     }
+    case 'workout':
+      return workoutSummary(log.data as WorkoutData)
   }
 }
 
@@ -52,6 +77,8 @@ function badge(log: Log): { label: string; kind: string } {
     case 'album':
     case 'song':
       return { label: 'music', kind: 'music' }
+    case 'workout':
+      return { label: 'gym', kind: 'gym' }
   }
 }
 
@@ -76,6 +103,8 @@ function rightSide(log: Log, onRate: (log: Log) => void): React.ReactNode {
     }
     case 'song':
       return <span className="status-label">{SONG_STATUS_LABEL[(log.data as SongData).status]}</span>
+    case 'workout':
+      return workoutVolume(log.data as WorkoutData)
     default:
       return ''
   }
@@ -114,7 +143,61 @@ function Editor({
       return <AlbumEditor log={log} onChange={onChange} onDelete={onDelete} onRate={onRate} />
     case 'song':
       return <SongEditor log={log} onChange={onChange} onDelete={onDelete} />
+    case 'workout':
+      return <WorkoutEditor log={log} onChange={onChange} onDelete={onDelete} />
   }
+}
+
+export function WorkoutBreakdown({ data }: { data: WorkoutData }) {
+  const meta = [
+    data.date,
+    data.duration_min !== null ? `${data.duration_min} min` : null,
+    data.impression,
+  ].filter(Boolean)
+
+  return (
+    <div className="workout-breakdown">
+      <span className="workout-meta">{meta.join(' · ')}</span>
+      {data.notes && <p className="workout-notes">{data.notes}</p>}
+      {data.exercises.map((exercise) => (
+        <div key={exercise.exercise_id} className="workout-exercise">
+          <span className="workout-exercise-name">{exercise.name}</span>
+          <span className="workout-sets">
+            {exercise.sets
+              .map((s) => {
+                const reps = s.reps ?? '?'
+                if (s.weight === null) return `${reps}`
+                return `${reps} × ${s.weight}${s.unit && s.unit !== 'kg' ? ` ${s.unit}` : ''}`
+              })
+              .join(', ')}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function WorkoutEditor({ log, onChange, onDelete }: EditorProps) {
+  const data = log.data as WorkoutData
+  const [note, setNote] = useState(data.note ?? '')
+  const { saving, error, save, remove } = useEditor(log, onChange, onDelete)
+
+  return (
+    <div className="editor">
+      <WorkoutBreakdown data={data} />
+      <label>
+        <span>note</span>
+        <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+      </label>
+      <EditorFooter
+        meta={`wger session ${data.wger_session_id}`}
+        saving={saving}
+        error={error}
+        onSave={() => save({ note: note.trim() || null })}
+        onDelete={remove}
+      />
+    </div>
+  )
 }
 
 interface EditorProps {

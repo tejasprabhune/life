@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::models::{AlbumData, NutritionData, Parsed, PersonData, SongData};
+use crate::models::{Action, AlbumData, NutritionData, Parsed, PersonData, SongData};
 use crate::usda;
 
 const CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
@@ -143,6 +143,23 @@ fn tools() -> Value {
                     "required": ["status"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "log_workout",
+                "description": "Log a gym workout. The session itself lives in wger; this pulls the latest one. Use when the user says they worked out, lifted, hit the gym, or similar.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "note": { "type": "string", "description": "Any free-text remark the user added, e.g. 'felt strong on squats'" },
+                        "allow_not_today": {
+                            "type": "boolean",
+                            "description": "True only when the user explicitly asks to log a past session, e.g. 'log my last workout even though it was yesterday'"
+                        }
+                    }
+                }
+            }
         }
     ])
 }
@@ -164,6 +181,9 @@ catch, remember, come back to, find this later, heard at, or playing at mean \
 to_revisit; came back to or finally listened again means revisited. \
 When the user gives only a vague description and no song title, leave title out \
 and put the description with the location in context. \
+For gym sessions, phrases like worked out, lifted, or hit the gym mean log_workout; \
+any extra remark goes in note. Set allow_not_today only when the user explicitly \
+asks to log a session that was not today. \
 Always call at least one tool.";
 
 async fn chat(http: &reqwest::Client, api_key: &str, raw_text: &str) -> Result<Vec<(String, Value)>> {
@@ -260,11 +280,26 @@ pub async fn parse(
     groq_key: &str,
     usda_key: &str,
     raw_text: &str,
-) -> Result<Vec<Parsed>> {
+) -> Result<Vec<Action>> {
     let calls = chat(http, groq_key, raw_text).await?;
     let mut results = Vec::with_capacity(calls.len());
     for (name, args) in calls {
-        results.extend(parse_call(http, usda_key, &name, args).await?);
+        if name == "log_workout" {
+            results.push(Action::Workout {
+                note: opt_str(&args, "note"),
+                allow_not_today: args
+                    .get("allow_not_today")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            });
+            continue;
+        }
+        results.extend(
+            parse_call(http, usda_key, &name, args)
+                .await?
+                .into_iter()
+                .map(Action::Entry),
+        );
     }
     if results.is_empty() {
         bail!("no entries parsed");

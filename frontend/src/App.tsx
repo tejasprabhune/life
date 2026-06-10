@@ -3,6 +3,7 @@ import { createLog, getToken, listLogs, setToken } from './api'
 import type { Category, Log, PendingLog } from './types'
 import { Row } from './Row'
 import { Guide } from './Guide'
+import { Gym } from './Gym'
 import { Music } from './Music'
 import { RateModal } from './RateModal'
 
@@ -43,6 +44,7 @@ const FILTERS: { value: Category; label: string }[] = [
   { value: 'nutrition', label: 'food' },
   { value: 'person', label: 'people' },
   { value: 'music', label: 'music' },
+  { value: 'workout', label: 'gym' },
 ]
 
 function matches(log: Log, category: Category): boolean {
@@ -64,6 +66,7 @@ export default function App() {
   if (!authed) return <Gate onUnlock={() => setAuthed(true)} />
   if (route.startsWith('#/guide')) return <Guide />
   if (route.startsWith('#/music')) return <Music />
+  if (route.startsWith('#/gym')) return <Gym />
   return <Home />
 }
 
@@ -102,6 +105,7 @@ function Home() {
   const [justParsed, setJustParsed] = useState<Set<string>>(new Set())
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [rateAlbum, setRateAlbum] = useState<Log | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [text, setText] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const today = localDateStr(new Date())
@@ -127,10 +131,14 @@ function Home() {
     ])
     if (!isToday) setDate(today)
     try {
-      const created = await createLog(rawText)
+      const { logs: created, notice: message } = await createLog(rawText)
       const createdIds = new Set(created.map((x) => x.id))
       setPendings((p) => p.filter((x) => x.tempId !== id))
       setLogs((l) => [...created, ...l.filter((x) => !createdIds.has(x.id))])
+      if (message) {
+        setNotice(message)
+        setTimeout(() => setNotice(null), 6000)
+      }
       setJustParsed((s) => {
         const next = new Set(s)
         created.forEach((x) => next.add(x.id))
@@ -168,6 +176,9 @@ function Home() {
       <header>
         <h1 className="brand">life</h1>
         <nav className="header-nav">
+          <a className="guide-link" href="#/gym">
+            gym
+          </a>
           <a className="guide-link" href="#/music">
             music
           </a>
@@ -221,6 +232,7 @@ function Home() {
       </div>
 
       <main className="list">
+        {notice && <div className="notice">{notice}</div>}
         {isToday &&
           pendings.map((p) => (
             <div

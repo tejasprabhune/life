@@ -15,6 +15,7 @@ pub struct Log {
 #[derive(Debug, Deserialize)]
 pub struct CreateLog {
     pub raw_text: String,
+    pub tz_offset_min: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +69,42 @@ pub struct SongData {
     pub thoughts: Option<String>,
     pub context: Option<String>,
     pub source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorkoutSet {
+    pub weight: Option<f64>,
+    pub reps: Option<i64>,
+    pub rir: Option<f64>,
+    pub rest_s: Option<i64>,
+    pub unit: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorkoutExercise {
+    pub exercise_id: i64,
+    pub name: String,
+    pub sets: Vec<WorkoutSet>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorkoutData {
+    pub wger_session_id: i64,
+    pub date: String,
+    pub notes: Option<String>,
+    pub note: Option<String>,
+    pub impression: Option<String>,
+    pub duration_min: Option<i64>,
+    pub exercises: Vec<WorkoutExercise>,
+    pub total_sets: i64,
+    pub total_volume: Option<f64>,
+}
+
+/// What one tool call asks the backend to do. Most calls carry a parsed
+/// entry; a workout call asks for a wger sync instead.
+pub enum Action {
+    Entry(Parsed),
+    Workout { note: Option<String>, allow_not_today: bool },
 }
 
 pub enum Parsed {

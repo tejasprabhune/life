@@ -17,6 +17,7 @@ mod models;
 mod music;
 mod routes;
 mod usda;
+mod wger;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -25,6 +26,7 @@ pub struct AppState {
     pub groq_key: String,
     pub usda_key: String,
     pub auth_token: String,
+    pub wger_key: Option<String>,
 }
 
 async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
@@ -58,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let groq_key = env::var("GROQ_API_KEY")?;
     let usda_key = env::var("USDA_API_KEY").unwrap_or_else(|_| "DEMO_KEY".into());
     let auth_token = env::var("AUTH_TOKEN")?;
+    let wger_key = env::var("WGER_API_KEY").ok().filter(|k| !k.is_empty());
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -82,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
-    let state = AppState { pool, http, groq_key, usda_key, auth_token };
+    let state = AppState { pool, http, groq_key, usda_key, auth_token, wger_key };
 
     let api = Router::new()
         .route("/api/logs", get(routes::list_logs).post(routes::create_log))
@@ -95,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/albums", get(music::list_albums))
         .route("/api/albums/{id}/rank", post(music::rank_album))
         .route("/api/songs", get(music::list_songs))
+        .route("/api/workouts", get(routes::list_workouts))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     let app = Router::new()
