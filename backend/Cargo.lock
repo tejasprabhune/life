@@ -894,6 +894,7 @@ dependencies = [
  "axum",
  "chrono",
  "dotenvy",
+ "percent-encoding",
  "reqwest",
  "serde",
  "serde_json",

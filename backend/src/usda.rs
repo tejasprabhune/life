@@ -1,4 +1,5 @@
 use anyhow::Result;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::Deserialize;
 
 const SEARCH_URL: &str = "https://api.nal.usda.gov/fdc/v1/foods/search";
@@ -71,16 +72,14 @@ pub async fn ground(
     query: &str,
     quantity_g: f64,
 ) -> Result<Option<GroundedFood>> {
-    let resp = http
-        .get(SEARCH_URL)
-        .query(&[
-            ("query", query),
-            ("dataType", "Foundation,SR Legacy,Survey (FNDDS)"),
-            ("pageSize", "5"),
-            ("api_key", api_key),
-        ])
-        .send()
-        .await?;
+    // The USDA gateway rejects '+'-encoded spaces and raw parentheses, so
+    // the query string is percent-encoded by hand.
+    let url = format!(
+        "{SEARCH_URL}?query={}&dataType=Foundation,SR%20Legacy,Survey%20%28FNDDS%29&pageSize=5&api_key={}",
+        utf8_percent_encode(query, NON_ALPHANUMERIC),
+        utf8_percent_encode(api_key, NON_ALPHANUMERIC),
+    );
+    let resp = http.get(url).send().await?;
 
     if !resp.status().is_success() {
         tracing::warn!(status = %resp.status(), query, "usda search failed");
