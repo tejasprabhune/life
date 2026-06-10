@@ -80,14 +80,19 @@ function Home() {
     ])
     if (!isToday) setDate(today)
     try {
-      const log = await createLog(rawText)
+      const created = await createLog(rawText)
+      const createdIds = new Set(created.map((x) => x.id))
       setPendings((p) => p.filter((x) => x.tempId !== id))
-      setLogs((l) => [log, ...l.filter((x) => x.id !== log.id)])
-      setJustParsed((s) => new Set(s).add(log.id))
+      setLogs((l) => [...created, ...l.filter((x) => !createdIds.has(x.id))])
+      setJustParsed((s) => {
+        const next = new Set(s)
+        created.forEach((x) => next.add(x.id))
+        return next
+      })
       setTimeout(() => {
         setJustParsed((s) => {
           const next = new Set(s)
-          next.delete(log.id)
+          createdIds.forEach((x) => next.delete(x))
           return next
         })
       }, 500)

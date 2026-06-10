@@ -76,36 +76,49 @@ fn tools() -> Value {
             "type": "function",
             "function": {
                 "name": "log_person",
-                "description": "Log a person the user met or talked to.",
+                "description": "Log one or more people the user met or talked to, one array element per person.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "name": { "type": "string", "description": "The person's name" },
-                        "email": { "type": "string", "description": "Email address if mentioned" },
-                        "phone": { "type": "string", "description": "Phone number if mentioned" },
-                        "context": {
-                            "type": "string",
-                            "description": "Where or how they met plus any notes worth remembering"
+                        "people": {
+                            "type": "array",
+                            "description": "Every person mentioned, as separate elements. Never combine two people into one element.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string", "description": "The person's name" },
+                                    "email": { "type": "string", "description": "This person's email address if mentioned" },
+                                    "phone": { "type": "string", "description": "This person's phone number if mentioned" },
+                                    "context": {
+                                        "type": "string",
+                                        "description": "Where or how they met plus any notes worth remembering"
+                                    }
+                                },
+                                "required": ["name", "context"]
+                            }
                         }
                     },
-                    "required": ["name", "context"]
+                    "required": ["people"]
                 }
             }
         }
     ])
 }
 
-const SYSTEM_PROMPT: &str = "You parse one short personal log entry into exactly one tool call. \
-Entries are either food eaten (log_nutrition) or a person met (log_person). \
+const SYSTEM_PROMPT: &str = "You parse one short personal log entry into tool calls. \
+Entries are either food eaten (log_nutrition) or people met (log_person). \
 For food, estimate realistic portion weights: a roti is about 40g, a naan about 90g, \
 a dosa about 120g, an idli about 40g, a samosa about 100g, a typical restaurant curry \
 serving about 250g, a cup of cooked rice about 160g. Scale macros to the full stated \
 quantity. If the entry names multiple foods, combine them into one dish entry with \
 summed macros and pick the dominant component for usda_query. \
-For people, extract the name and keep all remaining detail in context. \
-Always call exactly one tool.";
+For people, extract each name and keep all remaining detail in context. \
+If the entry mentions meeting more than one person, put each person in their own \
+people element: match emails and phone numbers to the right person and repeat the \
+shared context for each. Never combine two people into one element. \
+Always call at least one tool.";
 
-async fn chat(http: &reqwest::Client, api_key: &str, raw_text: &str) -> Result<(String, Value)> {
+async fn chat(http: &reqwest::Client, api_key: &str, raw_text: &str) -> Result<Vec<(String, Value)>> {
     let mut last_err = anyhow!("no groq models attempted");
 
     for model in MODELS {
@@ -143,24 +156,27 @@ async fn chat(http: &reqwest::Client, api_key: &str, raw_text: &str) -> Result<(
         }
 
         let parsed: ChatResponse = resp.json().await?;
-        let call = parsed
+        let calls = parsed
             .choices
             .into_iter()
             .next()
             .and_then(|c| c.message.tool_calls)
-            .and_then(|mut calls| if calls.is_empty() { None } else { Some(calls.remove(0)) });
+            .unwrap_or_default();
 
-        match call {
-            Some(call) => {
+        if calls.is_empty() {
+            last_err = anyhow!("groq {model} returned no tool call");
+            continue;
+        }
+
+        return calls
+            .into_iter()
+            .take(8)
+            .map(|call| {
                 let args: Value = serde_json::from_str(&call.function.arguments)
                     .context("tool call arguments were not valid JSON")?;
-                return Ok((call.function.name, args));
-            }
-            None => {
-                last_err = anyhow!("groq {model} returned no tool call");
-                continue;
-            }
-        }
+                Ok((call.function.name, args))
+            })
+            .collect();
     }
 
     Err(last_err)
@@ -187,18 +203,34 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Parse raw text into a structured log entry. Nutrition entries are grounded
-/// against USDA FoodData Central; if no usable match exists, the model's own
-/// estimates are kept and usda_fdc_id stays null.
+/// Parse raw text into structured log entries. One entry usually yields one
+/// tool call, but mentioning several people yields one log_person call each.
+/// Nutrition entries are grounded against USDA FoodData Central; if no usable
+/// match exists, the model's own estimates are kept and usda_fdc_id stays null.
 pub async fn parse(
     http: &reqwest::Client,
     groq_key: &str,
     usda_key: &str,
     raw_text: &str,
-) -> Result<Parsed> {
-    let (name, args) = chat(http, groq_key, raw_text).await?;
+) -> Result<Vec<Parsed>> {
+    let calls = chat(http, groq_key, raw_text).await?;
+    let mut results = Vec::with_capacity(calls.len());
+    for (name, args) in calls {
+        results.extend(parse_call(http, usda_key, &name, args).await?);
+    }
+    if results.is_empty() {
+        bail!("no entries parsed");
+    }
+    Ok(results)
+}
 
-    match name.as_str() {
+async fn parse_call(
+    http: &reqwest::Client,
+    usda_key: &str,
+    name: &str,
+    args: Value,
+) -> Result<Vec<Parsed>> {
+    match name {
         "log_nutrition" => {
             let food_name = as_str(&args, "food_name")?;
             let quantity = as_str(&args, "quantity")?;
@@ -252,15 +284,27 @@ pub async fn parse(
                     usda_fdc_id: None,
                 },
             };
-            Ok(Parsed::Nutrition(data))
+            Ok(vec![Parsed::Nutrition(data)])
         }
-        "log_person" => Ok(Parsed::Person(PersonData {
-            name: as_str(&args, "name")?,
-            email: opt_str(&args, "email"),
-            phone: opt_str(&args, "phone"),
-            context: as_str(&args, "context")?,
-            last_contacted: None,
-        })),
+        "log_person" => {
+            let people = args
+                .get("people")
+                .and_then(Value::as_array)
+                .ok_or_else(|| anyhow!("missing people array"))?;
+            people
+                .iter()
+                .take(8)
+                .map(|p| {
+                    Ok(Parsed::Person(PersonData {
+                        name: as_str(p, "name")?,
+                        email: opt_str(p, "email"),
+                        phone: opt_str(p, "phone"),
+                        context: as_str(p, "context")?,
+                        last_contacted: None,
+                    }))
+                })
+                .collect()
+        }
         other => bail!("unexpected tool call {other}"),
     }
 }

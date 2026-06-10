@@ -39,7 +39,7 @@ const LOG_COLUMNS: &str = "id, created_at, raw_input, parsed_type, data";
 pub async fn create_log(
     State(state): State<AppState>,
     Json(body): Json<CreateLog>,
-) -> Result<Json<Log>, AppError> {
+) -> Result<Json<Vec<Log>>, AppError> {
     let raw = body.raw_text.trim();
     if raw.is_empty() {
         return Err(AppError::BadRequest("raw_text is empty".into()));
@@ -47,17 +47,23 @@ pub async fn create_log(
 
     let parsed = groq::parse(&state.http, &state.groq_key, &state.usda_key, raw).await?;
 
-    let log: Log = sqlx::query_as(
-        "INSERT INTO logs (raw_input, parsed_type, data) VALUES ($1, $2, $3) \
-         RETURNING id, created_at, raw_input, parsed_type, data",
-    )
-    .bind(raw)
-    .bind(parsed.type_name())
-    .bind(parsed.to_json())
-    .fetch_one(&state.pool)
-    .await?;
+    let mut tx = state.pool.begin().await?;
+    let mut logs = Vec::with_capacity(parsed.len());
+    for entry in &parsed {
+        let log: Log = sqlx::query_as(
+            "INSERT INTO logs (raw_input, parsed_type, data) VALUES ($1, $2, $3) \
+             RETURNING id, created_at, raw_input, parsed_type, data",
+        )
+        .bind(raw)
+        .bind(entry.type_name())
+        .bind(entry.to_json())
+        .fetch_one(&mut *tx)
+        .await?;
+        logs.push(log);
+    }
+    tx.commit().await?;
 
-    Ok(Json(log))
+    Ok(Json(logs))
 }
 
 pub async fn list_logs(

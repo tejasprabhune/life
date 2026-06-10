@@ -16,7 +16,7 @@ async function check(res: Response): Promise<Response> {
   return res
 }
 
-export async function createLog(rawText: string): Promise<Log> {
+export async function createLog(rawText: string): Promise<Log[]> {
   const res = await fetch(`${API}/api/logs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
