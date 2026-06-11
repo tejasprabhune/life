@@ -463,6 +463,13 @@ pub async fn transcribe(
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-large-v3-turbo")
         .text("response_format", "json")
+        .text("language", "en")
+        .text(
+            "prompt",
+            "Personal log entry: food (roti, dal, dosa, paneer, biryani, cortado, oat milk), \
+             people met, albums and songs, gym via wger, places, trips, sleep, \
+             learning (CS 285, Sutton and Barto, policy gradient).",
+        )
         .part("file", part);
 
     let resp = state
@@ -480,7 +487,9 @@ pub async fn transcribe(
         return Err(AppError::Internal(anyhow::anyhow!("transcription failed")));
     }
     let body: serde_json::Value = resp.json().await.map_err(|e| AppError::Internal(e.into()))?;
-    Ok(Json(serde_json::json!({ "text": body["text"].as_str().unwrap_or("") })))
+    let raw = body["text"].as_str().unwrap_or("");
+    let text = groq::polish(&state.http, &state.groq_key, raw).await;
+    Ok(Json(serde_json::json!({ "text": text })))
 }
 
 pub async fn health() -> &'static str {

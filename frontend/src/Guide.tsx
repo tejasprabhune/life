@@ -142,7 +142,9 @@ export function Guide() {
       <section>
         <h2>voice</h2>
         <p>
-          Hold the mic button to speak instead of typing. The transcript drops into the
+          Hold the mic button to speak instead of typing. The transcript is cleaned up
+          before it lands: fillers and false starts go, self-corrections apply ("at 7,
+          no wait, 8" becomes "at 8"), spoken emails become addresses. It drops into the
           textbox for a quick glance before you submit with enter or the arrow.
         </p>
       </section>

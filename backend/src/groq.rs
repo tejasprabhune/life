@@ -380,6 +380,97 @@ async fn chat(
     Err(last_err)
 }
 
+const POLISH_MODEL: &str = "llama-3.1-8b-instant";
+
+const POLISH_PROMPT: &str = "You clean up a raw voice transcript of one short personal log entry \
+about food, people, music, gym, places, travel, sleep or studying. \
+Fix punctuation and capitalization. Remove filler words (um, uh, like, you know) and false starts. \
+Apply spoken self-corrections: 'at 7, no wait, 8' becomes 'at 8'. \
+Fix words the transcriber misheard when context makes the intent obvious, \
+especially number homophones: 'ate to rotis' means 'ate 2 rotis', 'for eggs' means '4 eggs', \
+and 'ate' where a number belongs means 8, so 'at 7, no wait, ate' becomes 'at 8'. \
+Write spoken emails and phone numbers as addresses and digits: \
+'sarah dot kim at gmail dot com' becomes 'sarah.kim@gmail.com'. \
+Never drop a quantity, name, food, time or unit. Do not add, summarize, rephrase or answer anything. \
+Output only the cleaned transcript, nothing else.";
+
+/// Clean up a whisper transcript with a small fast model. Returns the raw
+/// transcript untouched if the cleanup call fails or its output looks wrong,
+/// so transcription never gets worse than whisper alone.
+pub async fn polish(http: &reqwest::Client, api_key: &str, transcript: &str) -> String {
+    let raw = transcript.trim();
+    if raw.is_empty() {
+        return String::new();
+    }
+    let body = json!({
+        "model": POLISH_MODEL,
+        "temperature": 0,
+        "max_tokens": 500,
+        "messages": [
+            {"role": "system", "content": POLISH_PROMPT},
+            {"role": "user", "content": raw},
+        ],
+    });
+    let cleaned = async {
+        let resp = http
+            .post(CHAT_URL)
+            .bearer_auth(api_key)
+            .json(&body)
+            .send()
+            .await
+            .ok()?
+            .error_for_status()
+            .ok()?;
+        let value: Value = resp.json().await.ok()?;
+        let text = value["choices"][0]["message"]["content"].as_str()?.trim();
+        Some(text.trim_matches('"').trim().to_owned())
+    }
+    .await;
+    match cleaned {
+        Some(text) if usable_polish(raw, &text) => text,
+        _ => raw.to_owned(),
+    }
+}
+
+/// A cleaned transcript should be roughly the same size as the raw one;
+/// anything far shorter or longer means the model dropped content or chatted.
+fn usable_polish(raw: &str, cleaned: &str) -> bool {
+    if cleaned.is_empty() || cleaned.contains('\n') {
+        return false;
+    }
+    let raw_words = raw.split_whitespace().count();
+    let cleaned_words = cleaned.split_whitespace().count();
+    cleaned_words >= raw_words.div_ceil(3) && cleaned_words <= raw_words + raw_words / 2 + 3
+}
+
+#[cfg(test)]
+mod tests {
+    use super::usable_polish;
+
+    #[test]
+    fn polish_guard_accepts_normal_cleanup() {
+        assert!(usable_polish(
+            "um so I ate like two rotis with dal you know",
+            "I ate 2 rotis with dal."
+        ));
+        assert!(usable_polish("sleeping now", "Sleeping now."));
+    }
+
+    #[test]
+    fn polish_guard_rejects_dropped_or_added_content() {
+        let raw = "met Sarah Kim at the hackathon she works on compilers";
+        assert!(!usable_polish(raw, "Met Sarah."));
+        assert!(!usable_polish(
+            raw,
+            "Met Sarah Kim at the hackathon. She works on compilers. \
+             Networking events like hackathons are a great way to meet engineers \
+             and build long lasting professional relationships over time."
+        ));
+        assert!(!usable_polish(raw, ""));
+        assert!(!usable_polish(raw, "Sure, here is the cleaned transcript:\nMet Sarah Kim."));
+    }
+}
+
 fn as_f64(args: &Value, key: &str) -> Result<f64> {
     args.get(key)
         .and_then(Value::as_f64)
