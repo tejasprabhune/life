@@ -88,6 +88,66 @@ export function Guide() {
       </section>
 
       <section>
+        <h2>places</h2>
+        <p>
+          Log venues separately from food: the spot, what you ordered, what you thought.
+          Places get the same comparison-based rating as albums, ranked within their
+          category (coffee, restaurant, bar, dessert).
+        </p>
+        <ul>
+          <li>went to Blue Bottle, got a cortado, solid but pricey</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>travel</h2>
+        <p>
+          Log destinations with a small itinerary, then add to it later. Trips rank like
+          albums.
+        </p>
+        <ul>
+          <li>went to Lisbon, did tram 28, Belem, lots of pastel de nata</li>
+          <li>in Lisbon, add LX Factory</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>sleep</h2>
+        <p>
+          Two phrases open and close a night: the entry shows a quiet sleeping state until
+          you wake, then morphs into the duration. State a time and it is used instead of
+          the clock.
+        </p>
+        <ul>
+          <li>sleeping now</li>
+          <li>just woke up</li>
+          <li>went to bed at 11, just woke up</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>learning</h2>
+        <p>
+          Set up a field in the learning tab: add PDFs, links or named resources, then
+          generate and edit a topic plan. Daily progress is logged here in the input;
+          names resolve against your configured fields and resources.
+        </p>
+        <ul>
+          <li>watched CS 285 lecture 7</li>
+          <li>did 6 implementation problems on actor-critic, felt shaky</li>
+          <li>read chapter 3 of Sutton and Barto, feeling confident</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>voice</h2>
+        <p>
+          Hold the mic button to speak instead of typing. The transcript drops into the
+          textbox for a quick glance before you submit with enter or the arrow.
+        </p>
+      </section>
+
+      <section>
         <h2>tips</h2>
         <ul>
           <li>One thing per entry parses best. Log a meal as separate items for cleaner macros.</li>

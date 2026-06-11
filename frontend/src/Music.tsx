@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listAlbums, listSongs, updateLog } from './api'
-import { RateModal } from './RateModal'
+import { RateModal, rateProps } from './RateModal'
 import type { AlbumData, AlbumGroups, Log, SongData, Tier } from './types'
 
 const TIER_ORDER: Tier[] = ['loved', 'fine', 'disliked']
@@ -93,7 +93,8 @@ export function Music() {
 
       {rateAlbum && (
         <RateModal
-          album={rateAlbum}
+          {...rateProps(rateAlbum)}
+          itemId={rateAlbum.id}
           onClose={(rated) => {
             setRateAlbum(null)
             if (rated) void refresh()

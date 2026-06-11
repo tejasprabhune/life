@@ -13,8 +13,10 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 mod groq;
+mod learning;
 mod models;
 mod music;
+mod rank;
 mod routes;
 mod usda;
 mod wger;
@@ -96,10 +98,21 @@ async fn main() -> anyhow::Result<()> {
                 .delete(routes::delete_log),
         )
         .route("/api/albums", get(music::list_albums))
-        .route("/api/albums/{id}/rank", post(music::rank_album))
         .route("/api/songs", get(music::list_songs))
         .route("/api/workouts", get(routes::list_workouts))
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
+        .route("/api/rank", post(rank::rank))
+        .route("/api/rank/list", get(rank::list))
+        .route("/api/sleep", get(routes::list_sleep))
+        .route("/api/transcribe", post(routes::transcribe))
+        .route("/api/fields", get(learning::list_fields).post(learning::create_field))
+        .route("/api/fields/{id}", get(learning::get_field))
+        .route("/api/fields/{id}/resources", post(learning::add_resource))
+        .route("/api/fields/{id}/plan/generate", post(learning::generate_plan))
+        .route("/api/fields/{id}/plan", axum::routing::put(learning::save_plan))
+        .route("/api/resources/{id}", axum::routing::patch(learning::patch_resource))
+        .route("/api/topics/{id}", axum::routing::patch(learning::patch_topic))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_auth))
+        .layer(axum::extract::DefaultBodyLimit::max(60 * 1024 * 1024));
 
     let app = Router::new()
         .route("/health", get(routes::health))

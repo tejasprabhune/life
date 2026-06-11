@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createLog, getToken, listLogs, setToken } from './api'
+import { createLog, getToken, listLogs, setToken, transcribe } from './api'
 import type { Category, Log, PendingLog } from './types'
 import { Row } from './Row'
 import { Guide } from './Guide'
 import { Gym } from './Gym'
+import { Learning } from './Learning'
 import { Music } from './Music'
-import { RateModal } from './RateModal'
+import { Places } from './Places'
+import { RateModal, rateProps } from './RateModal'
+import { Sleep } from './Sleep'
+import { Travel } from './Travel'
 
 function localDateStr(d: Date): string {
   const y = d.getFullYear()
@@ -45,6 +49,10 @@ const FILTERS: { value: Category; label: string }[] = [
   { value: 'person', label: 'people' },
   { value: 'music', label: 'music' },
   { value: 'workout', label: 'gym' },
+  { value: 'place', label: 'places' },
+  { value: 'trip', label: 'travel' },
+  { value: 'learning', label: 'learning' },
+  { value: 'sleep', label: 'sleep' },
 ]
 
 function matches(log: Log, category: Category): boolean {
@@ -67,6 +75,10 @@ export default function App() {
   if (route.startsWith('#/guide')) return <Guide />
   if (route.startsWith('#/music')) return <Music />
   if (route.startsWith('#/gym')) return <Gym />
+  if (route.startsWith('#/places')) return <Places />
+  if (route.startsWith('#/travel')) return <Travel />
+  if (route.startsWith('#/sleep')) return <Sleep />
+  if (route.startsWith('#/learning')) return <Learning route={route} />
   return <Home />
 }
 
@@ -158,12 +170,61 @@ function Home() {
     }
   }
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter') return
+  const send = () => {
     const value = text.trim()
     if (!value) return
     setText('')
     void submit(value)
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') send()
+  }
+
+  const [recState, setRecState] = useState<'idle' | 'recording' | 'transcribing' | 'denied'>('idle')
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+
+  const startRecording = async () => {
+    if (recState !== 'idle') return
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'
+      const recorder = new MediaRecorder(stream, { mimeType: mime })
+      chunksRef.current = []
+      recorder.ondataavailable = (e) => chunksRef.current.push(e.data)
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(chunksRef.current, { type: mime })
+        if (blob.size < 1000) {
+          setRecState('idle')
+          return
+        }
+        setRecState('transcribing')
+        try {
+          const transcript = await transcribe(blob)
+          if (transcript) {
+            setText((t) => (t ? `${t} ${transcript}` : transcript))
+          }
+        } catch {
+          // leave the textbox as it was
+        }
+        setRecState('idle')
+        inputRef.current?.focus()
+      }
+      recorder.start()
+      recorderRef.current = recorder
+      setRecState('recording')
+    } catch {
+      setRecState('denied')
+      setTimeout(() => setRecState('idle'), 2500)
+    }
+  }
+
+  const stopRecording = () => {
+    if (recorderRef.current?.state === 'recording') {
+      recorderRef.current.stop()
+    }
   }
 
   const visible = logs.filter((l) => matches(l, category))
@@ -176,11 +237,23 @@ function Home() {
       <header>
         <h1 className="brand">life</h1>
         <nav className="header-nav">
+          <a className="guide-link" href="#/learning">
+            learning
+          </a>
           <a className="guide-link" href="#/gym">
             gym
           </a>
           <a className="guide-link" href="#/music">
             music
+          </a>
+          <a className="guide-link" href="#/places">
+            places
+          </a>
+          <a className="guide-link" href="#/travel">
+            travel
+          </a>
+          <a className="guide-link" href="#/sleep">
+            sleep
           </a>
           <a className="guide-link" href="#/guide">
             guide
@@ -188,17 +261,56 @@ function Home() {
         </nav>
       </header>
 
-      <input
-        ref={inputRef}
-        className="entry-input"
-        type="text"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder="write anything..."
-        autoFocus
-        enterKeyHint="send"
-      />
+      <div className="input-wrap">
+        <input
+          ref={inputRef}
+          className="entry-input"
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={
+            recState === 'recording'
+              ? 'listening...'
+              : recState === 'transcribing'
+                ? 'transcribing...'
+                : recState === 'denied'
+                  ? 'microphone access denied'
+                  : 'write anything...'
+          }
+          autoFocus
+          enterKeyHint="send"
+        />
+        <div className="input-actions">
+          <button
+            className={`mic-btn ${recState}`}
+            onPointerDown={(e) => {
+              e.preventDefault()
+              void startRecording()
+            }}
+            onPointerUp={stopRecording}
+            onPointerLeave={stopRecording}
+            aria-label="hold to record"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0" />
+              <line x1="12" y1="18" x2="12" y2="21" />
+            </svg>
+          </button>
+          <button
+            className="send-btn"
+            onClick={send}
+            disabled={!text.trim()}
+            aria-label="log entry"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <line x1="3" y1="12" x2="20" y2="12" />
+              <polyline points="13 5 20 12 13 19" />
+            </svg>
+          </button>
+        </div>
+      </div>
 
       <div className="dateline">
         <div className="datenav">
@@ -283,7 +395,8 @@ function Home() {
 
       {rateAlbum && (
         <RateModal
-          album={rateAlbum}
+          {...rateProps(rateAlbum)}
+          itemId={rateAlbum.id}
           onClose={(rated) => {
             setRateAlbum(null)
             if (rated) void refresh(date)

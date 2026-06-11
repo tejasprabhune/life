@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { rankAlbum } from './api'
-import type { AlbumData, Log, Opponent, RankComparison, Tier } from './types'
+import { rankItem } from './api'
+import type { Opponent, RankComparison, Tier } from './types'
 
 interface RateModalProps {
-  album: Log
+  domain: string
+  category: string | null
+  itemId: string
+  label: string
   onClose: (rated: boolean) => void
 }
 
@@ -13,8 +16,7 @@ const TIERS: { value: Tier; label: string }[] = [
   { value: 'disliked', label: 'disliked it' },
 ]
 
-export function RateModal({ album, onClose }: RateModalProps) {
-  const data = album.data as AlbumData
+export function RateModal({ domain, category, itemId, label, onClose }: RateModalProps) {
   const [tier, setTier] = useState<Tier | null>(null)
   const [comparisons, setComparisons] = useState<RankComparison[]>([])
   const [opponent, setOpponent] = useState<Opponent | null>(null)
@@ -26,7 +28,7 @@ export function RateModal({ album, onClose }: RateModalProps) {
     setBusy(true)
     setError('')
     try {
-      const res = await rankAlbum(album.id, t, comps)
+      const res = await rankItem(domain, category, itemId, t, comps)
       if (res.done) {
         setRating(res.rating)
         setTimeout(() => onClose(true), 1100)
@@ -60,16 +62,12 @@ export function RateModal({ album, onClose }: RateModalProps) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         {rating !== null ? (
           <div className="modal-card result" key="result">
-            <span className="modal-album">
-              {data.title}, {data.artist}
-            </span>
+            <span className="modal-album">{label}</span>
             <span className="modal-rating">{rating.toFixed(1)}</span>
           </div>
         ) : tier === null ? (
           <div className="modal-card" key="tier">
-            <span className="modal-album">
-              {data.title}, {data.artist}
-            </span>
+            <span className="modal-album">{label}</span>
             <div className="tier-buttons">
               {TIERS.map((t) => (
                 <button key={t.value} className="tier-btn" onClick={() => pickTier(t.value)}>
@@ -84,13 +82,11 @@ export function RateModal({ album, onClose }: RateModalProps) {
             <span className="modal-question">which did you prefer?</span>
             <div className="versus">
               <button className="versus-btn" disabled={busy} onClick={() => choose('this')}>
-                <span className="versus-title">{data.title}</span>
-                <span className="versus-artist">{data.artist}</span>
+                <span className="versus-title">{label}</span>
               </button>
               {opponent && (
                 <button className="versus-btn" disabled={busy} onClick={() => choose('that')}>
-                  <span className="versus-title">{opponent.title}</span>
-                  <span className="versus-artist">{opponent.artist}</span>
+                  <span className="versus-title">{opponent.label}</span>
                 </button>
               )}
             </div>
@@ -100,4 +96,22 @@ export function RateModal({ album, onClose }: RateModalProps) {
       </div>
     </div>
   )
+}
+
+export function rateProps(log: { parsed_type: string; data: unknown }): {
+  domain: string
+  category: string | null
+  label: string
+} {
+  const data = log.data as Record<string, unknown>
+  switch (log.parsed_type) {
+    case 'album':
+      return { domain: 'album', category: null, label: `${data.title}, ${data.artist}` }
+    case 'place':
+      return { domain: 'place', category: String(data.category), label: String(data.name) }
+    case 'trip':
+      return { domain: 'trip', category: null, label: String(data.destination) }
+    default:
+      return { domain: '', category: null, label: '' }
+  }
 }

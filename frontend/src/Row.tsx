@@ -2,11 +2,15 @@ import { useState } from 'react'
 import { deleteLog, updateLog } from './api'
 import type {
   AlbumData,
+  LearningData,
   Log,
   NutritionData,
   PersonData,
+  PlaceData,
+  SleepData,
   SongData,
   SongStatus,
+  TripData,
   WorkoutData,
 } from './types'
 
@@ -48,6 +52,31 @@ export function workoutVolume(data: WorkoutData): string {
   return `${data.total_volume.toLocaleString()} ${unit}`
 }
 
+export function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `${m}m`
+  return `${h}h ${String(m).padStart(2, '0')}m`
+}
+
+export function learningSummary(data: LearningData): string {
+  const parts: string[] = []
+  if (data.resource_title && data.resource_progress !== null) {
+    parts.push(`${data.resource_title} ${data.resource_progress}`)
+  } else if (data.resource_title) {
+    parts.push(data.resource_title)
+  }
+  if (data.problems_count !== null) {
+    const kind = data.problems_type === 'implementation' ? 'impl' : data.problems_type ?? ''
+    parts.push(`+${data.problems_count} ${kind} problems`.replace('  ', ' '))
+  }
+  if (data.topic_name && !parts.length) parts.push(data.topic_name)
+  if (!parts.length && data.note) parts.push(data.note)
+  if (!parts.length) parts.push('studied')
+  const prefix = data.field_name ? `${data.field_name}: ` : ''
+  return prefix + parts.join(', ')
+}
+
 function summary(log: Log): string {
   switch (log.parsed_type) {
     case 'nutrition':
@@ -65,6 +94,23 @@ function summary(log: Log): string {
     }
     case 'workout':
       return workoutSummary(log.data as WorkoutData)
+    case 'place': {
+      const p = log.data as PlaceData
+      return p.order_text ? `${p.name}, ${p.order_text}` : p.name
+    }
+    case 'trip': {
+      const t = log.data as TripData
+      const stops = t.itinerary.length
+      return stops > 0 ? `${t.destination}, ${stops} stop${stops === 1 ? '' : 's'}` : t.destination
+    }
+    case 'sleep': {
+      const s = log.data as SleepData
+      if (s.sleep_end === null) return 'sleeping'
+      if (s.duration_min !== null) return `slept ${formatDuration(s.duration_min)}`
+      return 'woke up'
+    }
+    case 'learning':
+      return learningSummary(log.data as LearningData)
   }
 }
 
@@ -79,6 +125,14 @@ function badge(log: Log): { label: string; kind: string } {
       return { label: 'music', kind: 'music' }
     case 'workout':
       return { label: 'gym', kind: 'gym' }
+    case 'place':
+      return { label: 'places', kind: 'place' }
+    case 'trip':
+      return { label: 'travel', kind: 'trip' }
+    case 'sleep':
+      return { label: 'sleep', kind: 'sleep' }
+    case 'learning':
+      return { label: 'learning', kind: 'learning' }
   }
 }
 
@@ -105,6 +159,26 @@ function rightSide(log: Log, onRate: (log: Log) => void): React.ReactNode {
       return <span className="status-label">{SONG_STATUS_LABEL[(log.data as SongData).status]}</span>
     case 'workout':
       return workoutVolume(log.data as WorkoutData)
+    case 'place':
+    case 'trip': {
+      const rated = (log.data as PlaceData | TripData).rating
+      if (rated !== null) return rated.toFixed(1)
+      return (
+        <button
+          className="rate-link"
+          onClick={(e) => {
+            e.stopPropagation()
+            onRate(log)
+          }}
+        >
+          rate
+        </button>
+      )
+    }
+    case 'sleep': {
+      const s = log.data as SleepData
+      return s.sleep_end === null ? <span className="status-label">zzz</span> : ''
+    }
     default:
       return ''
   }
@@ -145,7 +219,262 @@ function Editor({
       return <SongEditor log={log} onChange={onChange} onDelete={onDelete} />
     case 'workout':
       return <WorkoutEditor log={log} onChange={onChange} onDelete={onDelete} />
+    case 'place':
+      return <PlaceEditor log={log} onChange={onChange} onDelete={onDelete} onRate={onRate} />
+    case 'trip':
+      return <TripEditor log={log} onChange={onChange} onDelete={onDelete} onRate={onRate} />
+    case 'sleep':
+      return <SleepEditor log={log} onChange={onChange} onDelete={onDelete} />
+    case 'learning':
+      return <LearningEditor log={log} onChange={onChange} onDelete={onDelete} />
   }
+}
+
+const PLACE_CATEGORIES = ['coffee', 'restaurant', 'bar', 'dessert', 'other'] as const
+
+function PlaceEditor({
+  log,
+  onChange,
+  onDelete,
+  onRate,
+}: EditorProps & { onRate: (log: Log) => void }) {
+  const data = log.data as PlaceData
+  const [fields, setFields] = useState({
+    name: data.name,
+    order_text: data.order_text ?? '',
+    city: data.city ?? '',
+    thoughts: data.thoughts ?? '',
+  })
+  const [category, setCategory] = useState(data.category)
+  const { saving, error, save, remove } = useEditor(log, onChange, onDelete)
+
+  const submit = () =>
+    save({
+      name: fields.name,
+      category,
+      order_text: fields.order_text.trim() || null,
+      city: fields.city.trim() || null,
+      thoughts: fields.thoughts.trim() || null,
+    })
+
+  const meta =
+    data.rating !== null && data.rating_tier
+      ? `${data.rating_tier} ${data.rating.toFixed(1)}`
+      : 'unrated'
+
+  return (
+    <div className="editor">
+      <div className="editor-grid two">
+        <label>
+          <span>name</span>
+          <input value={fields.name} onChange={(e) => setFields({ ...fields, name: e.target.value })} />
+        </label>
+        <label>
+          <span>order</span>
+          <input
+            value={fields.order_text}
+            onChange={(e) => setFields({ ...fields, order_text: e.target.value })}
+          />
+        </label>
+      </div>
+      <label>
+        <span>category</span>
+        <div className="status-buttons">
+          {PLACE_CATEGORIES.map((c) => (
+            <button
+              key={c}
+              className={`filter ${category === c ? 'active' : ''}`}
+              onClick={() => setCategory(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </label>
+      <div className="editor-grid two">
+        <label>
+          <span>city</span>
+          <input value={fields.city} onChange={(e) => setFields({ ...fields, city: e.target.value })} />
+        </label>
+      </div>
+      <label>
+        <span>thoughts</span>
+        <textarea
+          rows={2}
+          value={fields.thoughts}
+          onChange={(e) => setFields({ ...fields, thoughts: e.target.value })}
+        />
+      </label>
+      <div className="editor-footer">
+        <span className="editor-meta">{error || meta}</span>
+        <div className="editor-actions">
+          <button className="action" onClick={() => onRate(log)}>
+            {data.rating !== null ? 're-rank' : 'rate'}
+          </button>
+          <button className="action delete" onClick={remove}>
+            delete
+          </button>
+          <button className="action save" onClick={submit} disabled={saving}>
+            {saving ? 'saving' : 'save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TripEditor({
+  log,
+  onChange,
+  onDelete,
+  onRate,
+}: EditorProps & { onRate: (log: Log) => void }) {
+  const data = log.data as TripData
+  const [fields, setFields] = useState({
+    destination: data.destination,
+    start_date: data.start_date ?? '',
+    end_date: data.end_date ?? '',
+    thoughts: data.thoughts ?? '',
+  })
+  const { saving, error, save, remove } = useEditor(log, onChange, onDelete)
+
+  const submit = () =>
+    save({
+      destination: fields.destination,
+      start_date: fields.start_date.trim() || null,
+      end_date: fields.end_date.trim() || null,
+      thoughts: fields.thoughts.trim() || null,
+    })
+
+  const meta =
+    data.rating !== null && data.rating_tier
+      ? `${data.rating_tier} ${data.rating.toFixed(1)}`
+      : 'unrated'
+
+  return (
+    <div className="editor">
+      <label>
+        <span>destination</span>
+        <input
+          value={fields.destination}
+          onChange={(e) => setFields({ ...fields, destination: e.target.value })}
+        />
+      </label>
+      <div className="editor-grid two">
+        <label>
+          <span>start</span>
+          <input
+            placeholder="YYYY-MM-DD"
+            value={fields.start_date}
+            onChange={(e) => setFields({ ...fields, start_date: e.target.value })}
+          />
+        </label>
+        <label>
+          <span>end</span>
+          <input
+            placeholder="YYYY-MM-DD"
+            value={fields.end_date}
+            onChange={(e) => setFields({ ...fields, end_date: e.target.value })}
+          />
+        </label>
+      </div>
+      {data.itinerary.length > 0 && (
+        <div className="itinerary">
+          {data.itinerary.map((item, i) => (
+            <div key={i} className="itinerary-item">
+              <span>{item.name}</span>
+              {item.note && <span className="row-sub"> {item.note}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <label>
+        <span>thoughts</span>
+        <textarea
+          rows={2}
+          value={fields.thoughts}
+          onChange={(e) => setFields({ ...fields, thoughts: e.target.value })}
+        />
+      </label>
+      <div className="editor-footer">
+        <span className="editor-meta">{error || meta}</span>
+        <div className="editor-actions">
+          <button className="action" onClick={() => onRate(log)}>
+            {data.rating !== null ? 're-rank' : 'rate'}
+          </button>
+          <button className="action delete" onClick={remove}>
+            delete
+          </button>
+          <button className="action save" onClick={submit} disabled={saving}>
+            {saving ? 'saving' : 'save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function timeShort(iso: string | null): string {
+  if (!iso) return '?'
+  return new Date(iso)
+    .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    .toLowerCase()
+    .replace(' ', '')
+}
+
+function SleepEditor({ log, onChange, onDelete }: EditorProps) {
+  const data = log.data as SleepData
+  const { error, remove } = useEditor(log, onChange, onDelete)
+
+  return (
+    <div className="editor">
+      <span className="workout-meta">
+        {timeShort(data.sleep_start)} to {timeShort(data.sleep_end)}
+        {data.duration_min !== null ? `, ${formatDuration(data.duration_min)}` : ''}
+        {` (night of ${data.night_date})`}
+      </span>
+      <div className="editor-footer">
+        <span className="editor-meta">{error}</span>
+        <div className="editor-actions">
+          <button className="action delete" onClick={remove}>
+            delete
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LearningEditor({ log, onChange, onDelete }: EditorProps) {
+  const data = log.data as LearningData
+  const [note, setNote] = useState(data.note ?? '')
+  const { saving, error, save, remove } = useEditor(log, onChange, onDelete)
+
+  const meta = [
+    data.field_name,
+    data.resource_title,
+    data.topic_name,
+    data.kind,
+    data.problems_count !== null ? `${data.problems_count} ${data.problems_type ?? ''} problems` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <div className="editor">
+      <span className="workout-meta">{meta}</span>
+      <label>
+        <span>note</span>
+        <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+      </label>
+      <EditorFooter
+        saving={saving}
+        error={error}
+        onSave={() => save({ note: note.trim() || null })}
+        onDelete={remove}
+      />
+    </div>
+  )
 }
 
 export function WorkoutBreakdown({ data }: { data: WorkoutData }) {

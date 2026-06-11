@@ -2,7 +2,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::models::{Action, AlbumData, NutritionData, Parsed, PersonData, SongData};
+use crate::models::{
+    Action, AlbumData, ItineraryEntry, LearningRequest, NutritionData, Parsed, PersonData,
+    PlaceData, SongData, TripData,
+};
 use crate::usda;
 
 const CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
@@ -147,6 +150,117 @@ fn tools() -> Value {
         {
             "type": "function",
             "function": {
+                "name": "log_place",
+                "description": "Log a venue the user visited: a cafe, restaurant, bar or dessert spot. Separate from food macros; this is about the place itself.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "Venue name" },
+                        "category": {
+                            "type": "string",
+                            "enum": ["coffee", "restaurant", "bar", "dessert", "other"],
+                            "description": "Venue kind, inferred when unstated"
+                        },
+                        "order_text": { "type": "string", "description": "What the user ordered" },
+                        "thoughts": { "type": "string", "description": "The user's impressions" },
+                        "city": { "type": "string", "description": "City if mentioned" }
+                    },
+                    "required": ["name", "category"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "log_trip",
+                "description": "Log a trip or destination the user visited.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "destination": { "type": "string", "description": "City, region or country visited" },
+                        "itinerary_items": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Things done or seen on the trip"
+                        },
+                        "thoughts": { "type": "string", "description": "The user's impressions" },
+                        "start_date": { "type": "string", "description": "YYYY-MM-DD if mentioned" },
+                        "end_date": { "type": "string", "description": "YYYY-MM-DD if mentioned" }
+                    },
+                    "required": ["destination"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "log_itinerary_item",
+                "description": "Add one item to an existing trip's itinerary, e.g. 'in Lisbon, add LX Factory'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "destination": { "type": "string", "description": "Trip destination; omit to use the most recent open trip" },
+                        "name": { "type": "string", "description": "The itinerary item" },
+                        "note": { "type": "string", "description": "Optional note about the item" }
+                    },
+                    "required": ["name"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "log_sleep",
+                "description": "Open or close a sleep session. 'sleeping now' starts one; 'just woke up' ends it.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["start", "end", "both"],
+                            "description": "start when going to sleep, end when waking up, both when one phrase states a bedtime and that they are now awake"
+                        },
+                        "at": {
+                            "type": "string",
+                            "description": "ISO timestamp override when the user states a time, e.g. 'went to bed at 11'; compute from the current local time given in the system prompt"
+                        }
+                    },
+                    "required": ["action"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "log_learning",
+                "description": "Log study progress on a field the user is learning: lectures or chapters finished, problems done, or a note. Match field, resource and topic to the user's configured names listed in the system prompt.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "field": { "type": "string", "description": "The learning field this belongs to" },
+                        "resource": { "type": "string", "description": "Resource name when mentioned, e.g. a lecture series or book" },
+                        "topic": { "type": "string", "description": "Topic name when mentioned" },
+                        "kind": {
+                            "type": "string",
+                            "enum": ["study", "problems", "note"],
+                            "description": "study for watching or reading, problems for exercises, note otherwise"
+                        },
+                        "resource_progress": { "type": "integer", "description": "New unit reached, e.g. 7 for 'lecture 7'" },
+                        "problems_count": { "type": "integer", "description": "How many problems were done" },
+                        "problems_type": { "type": "string", "enum": ["theory", "implementation"] },
+                        "confidence_signal": {
+                            "type": "string",
+                            "description": "up when the user felt good, down when shaky, or set:N for an explicit 1-5 rating"
+                        },
+                        "note": { "type": "string", "description": "Any remaining detail" }
+                    },
+                    "required": ["kind"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "log_workout",
                 "description": "Log a gym workout. The session itself lives in wger; this pulls the latest one. Use when the user says they worked out, lifted, hit the gym, or similar.",
                 "parameters": {
@@ -184,16 +298,32 @@ and put the description with the location in context. \
 For gym sessions, phrases like worked out, lifted, or hit the gym mean log_workout; \
 any extra remark goes in note. Set allow_not_today only when the user explicitly \
 asks to log a session that was not today. \
+Visiting a cafe, restaurant, bar or dessert spot is log_place; what they ate there \
+can additionally be log_nutrition only when they describe the food as eaten. \
+Trips to cities or countries are log_trip with itinerary_items for things done. \
+Adding one thing to an existing trip is log_itinerary_item. \
+Sleeping now or going to bed is log_sleep action start; waking up is action end; \
+when a clock time is stated, compute the ISO timestamp from the current local time. \
+A phrase stating both a bedtime and waking up means one log_sleep call with action \
+both and at set to the stated bedtime. \
+Study progress, watched lectures, finished chapters, or practice problems are \
+log_learning; match names against the configured fields listed below when present. \
 Always call at least one tool.";
 
-async fn chat(http: &reqwest::Client, api_key: &str, raw_text: &str) -> Result<Vec<(String, Value)>> {
+async fn chat(
+    http: &reqwest::Client,
+    api_key: &str,
+    raw_text: &str,
+    context: &str,
+) -> Result<Vec<(String, Value)>> {
     let mut last_err = anyhow!("no groq models attempted");
+    let system = format!("{SYSTEM_PROMPT}\n\n{context}");
 
     for model in MODELS {
         let body = json!({
             "model": model,
             "messages": [
-                { "role": "system", "content": SYSTEM_PROMPT },
+                { "role": "system", "content": system },
                 { "role": "user", "content": raw_text }
             ],
             "tools": tools(),
@@ -280,26 +410,56 @@ pub async fn parse(
     groq_key: &str,
     usda_key: &str,
     raw_text: &str,
+    context: &str,
 ) -> Result<Vec<Action>> {
-    let calls = chat(http, groq_key, raw_text).await?;
+    let calls = chat(http, groq_key, raw_text, context).await?;
     let mut results = Vec::with_capacity(calls.len());
     for (name, args) in calls {
-        if name == "log_workout" {
-            results.push(Action::Workout {
+        match name.as_str() {
+            "log_workout" => results.push(Action::Workout {
                 note: opt_str(&args, "note"),
                 allow_not_today: args
                     .get("allow_not_today")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
-            });
-            continue;
+            }),
+            "log_itinerary_item" => results.push(Action::ItineraryItem {
+                destination: opt_str(&args, "destination"),
+                name: as_str(&args, "name")?,
+                note: opt_str(&args, "note"),
+            }),
+            "log_sleep" => {
+                let action = as_str(&args, "action")?;
+                if !matches!(action.as_str(), "start" | "end" | "both") {
+                    bail!("sleep action must be start, end or both");
+                }
+                results.push(Action::Sleep { action, at: opt_str(&args, "at") });
+            }
+            "log_learning" => {
+                let kind = as_str(&args, "kind")?;
+                if !matches!(kind.as_str(), "study" | "problems" | "note") {
+                    bail!("learning kind must be study, problems or note");
+                }
+                results.push(Action::Learning(LearningRequest {
+                    field: opt_str(&args, "field"),
+                    resource: opt_str(&args, "resource"),
+                    topic: opt_str(&args, "topic"),
+                    kind,
+                    resource_progress: args.get("resource_progress").and_then(Value::as_i64),
+                    problems_count: args.get("problems_count").and_then(Value::as_i64),
+                    problems_type: opt_str(&args, "problems_type")
+                        .filter(|t| matches!(t.as_str(), "theory" | "implementation")),
+                    confidence_signal: opt_str(&args, "confidence_signal"),
+                    note: opt_str(&args, "note"),
+                }));
+            }
+            _ => results.extend(
+                parse_call(http, usda_key, &name, args)
+                    .await?
+                    .into_iter()
+                    .map(Action::Entry),
+            ),
         }
-        results.extend(
-            parse_call(http, usda_key, &name, args)
-                .await?
-                .into_iter()
-                .map(Action::Entry),
-        );
     }
     if results.is_empty() {
         bail!("no entries parsed");
@@ -387,6 +547,46 @@ async fn parse_call(
                     }))
                 })
                 .collect()
+        }
+        "log_place" => {
+            let category = as_str(&args, "category")?;
+            if !crate::rank::PLACE_CATEGORIES.contains(&category.as_str()) {
+                bail!("unexpected place category {category}");
+            }
+            Ok(vec![Parsed::Place(PlaceData {
+                name: as_str(&args, "name")?,
+                category,
+                order_text: opt_str(&args, "order_text"),
+                thoughts: opt_str(&args, "thoughts"),
+                city: opt_str(&args, "city"),
+                address: None,
+                rating: None,
+                rating_tier: None,
+                rank_position: None,
+            })])
+        }
+        "log_trip" => {
+            let itinerary = args
+                .get("itinerary_items")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|name| ItineraryEntry { name: name.to_string(), note: None })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(vec![Parsed::Trip(TripData {
+                destination: as_str(&args, "destination")?,
+                start_date: opt_str(&args, "start_date"),
+                end_date: opt_str(&args, "end_date"),
+                itinerary,
+                thoughts: opt_str(&args, "thoughts"),
+                rating: None,
+                rating_tier: None,
+                rank_position: None,
+            })])
         }
         "log_album" => Ok(vec![Parsed::Album(AlbumData {
             artist: as_str(&args, "artist")?,

@@ -100,11 +100,81 @@ pub struct WorkoutData {
     pub total_volume: Option<f64>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlaceData {
+    pub name: String,
+    pub category: String,
+    pub order_text: Option<String>,
+    pub thoughts: Option<String>,
+    pub city: Option<String>,
+    pub address: Option<String>,
+    pub rating: Option<f64>,
+    pub rating_tier: Option<String>,
+    pub rank_position: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ItineraryEntry {
+    pub name: String,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TripData {
+    pub destination: String,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub itinerary: Vec<ItineraryEntry>,
+    pub thoughts: Option<String>,
+    pub rating: Option<f64>,
+    pub rating_tier: Option<String>,
+    pub rank_position: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SleepData {
+    pub sleep_start: Option<DateTime<Utc>>,
+    pub sleep_end: Option<DateTime<Utc>>,
+    pub duration_min: Option<i64>,
+    pub night_date: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LearningData {
+    pub field_id: Option<Uuid>,
+    pub field_name: Option<String>,
+    pub resource_id: Option<Uuid>,
+    pub resource_title: Option<String>,
+    pub topic_id: Option<Uuid>,
+    pub topic_name: Option<String>,
+    pub kind: String,
+    pub resource_progress: Option<i64>,
+    pub problems_count: Option<i64>,
+    pub problems_type: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct LearningRequest {
+    pub field: Option<String>,
+    pub resource: Option<String>,
+    pub topic: Option<String>,
+    pub kind: String,
+    pub resource_progress: Option<i64>,
+    pub problems_count: Option<i64>,
+    pub problems_type: Option<String>,
+    pub confidence_signal: Option<String>,
+    pub note: Option<String>,
+}
+
 /// What one tool call asks the backend to do. Most calls carry a parsed
-/// entry; a workout call asks for a wger sync instead.
+/// entry; the rest need database side effects beyond a plain insert.
 pub enum Action {
     Entry(Parsed),
     Workout { note: Option<String>, allow_not_today: bool },
+    ItineraryItem { destination: Option<String>, name: String, note: Option<String> },
+    Sleep { action: String, at: Option<String> },
+    Learning(LearningRequest),
 }
 
 pub enum Parsed {
@@ -112,6 +182,8 @@ pub enum Parsed {
     Person(PersonData),
     Album(AlbumData),
     Song(SongData),
+    Place(PlaceData),
+    Trip(TripData),
 }
 
 impl Parsed {
@@ -121,6 +193,8 @@ impl Parsed {
             Parsed::Person(_) => "person",
             Parsed::Album(_) => "album",
             Parsed::Song(_) => "song",
+            Parsed::Place(_) => "place",
+            Parsed::Trip(_) => "trip",
         }
     }
 
@@ -130,6 +204,8 @@ impl Parsed {
             Parsed::Person(p) => serde_json::to_value(p).unwrap(),
             Parsed::Album(a) => serde_json::to_value(a).unwrap(),
             Parsed::Song(s) => serde_json::to_value(s).unwrap(),
+            Parsed::Place(p) => serde_json::to_value(p).unwrap(),
+            Parsed::Trip(t) => serde_json::to_value(t).unwrap(),
         }
     }
 }

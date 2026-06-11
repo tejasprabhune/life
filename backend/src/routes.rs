@@ -5,8 +5,8 @@ use axum::Json;
 use chrono::{Duration, NaiveDate, TimeZone, Utc};
 use uuid::Uuid;
 
-use crate::models::{Action, CreateLog, ListQuery, Log, UpdateLog};
-use crate::{groq, wger, AppState};
+use crate::models::{Action, CreateLog, ItineraryEntry, ListQuery, Log, SleepData, UpdateLog};
+use crate::{groq, learning, wger, AppState};
 
 pub enum AppError {
     NotFound,
@@ -95,6 +95,153 @@ async fn upsert_workout(
     }
 }
 
+fn parse_at(at: &Option<String>, tz_offset: i32) -> Option<chrono::DateTime<Utc>> {
+    let s = at.as_deref()?.trim();
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    // A bare local datetime is shifted to UTC with the request's offset.
+    let formats = ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"];
+    for f in &formats {
+        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, f) {
+            return Some(Utc.from_utc_datetime(&naive) + Duration::minutes(tz_offset as i64));
+        }
+    }
+    None
+}
+
+fn local_date(ts: chrono::DateTime<Utc>, tz_offset: i32) -> String {
+    (ts - Duration::minutes(tz_offset as i64)).date_naive().to_string()
+}
+
+async fn open_sleep(state: &AppState) -> Result<Option<Log>, AppError> {
+    let log: Option<Log> = sqlx::query_as(&format!(
+        "SELECT {LOG_COLUMNS} FROM logs \
+         WHERE parsed_type = 'sleep' AND deleted_at IS NULL \
+         AND data->>'sleep_end' IS NULL ORDER BY created_at DESC LIMIT 1"
+    ))
+    .fetch_all(&state.pool)
+    .await?
+    .into_iter()
+    .next();
+    Ok(log)
+}
+
+async fn handle_sleep(
+    state: &AppState,
+    raw: &str,
+    action: &str,
+    at: Option<chrono::DateTime<Utc>>,
+    tz_offset: i32,
+) -> Result<Log, AppError> {
+    let ts = at.unwrap_or_else(Utc::now);
+    let open = open_sleep(state).await?;
+
+    if action == "start" {
+        if let Some(log) = open {
+            let patch = serde_json::json!({
+                "sleep_start": ts,
+                "night_date": local_date(ts, tz_offset),
+            });
+            let updated: Log = sqlx::query_as(&format!(
+                "UPDATE logs SET data = data || $2 WHERE id = $1 RETURNING {LOG_COLUMNS}"
+            ))
+            .bind(log.id)
+            .bind(patch)
+            .fetch_one(&state.pool)
+            .await?;
+            return Ok(updated);
+        }
+        let data = SleepData {
+            sleep_start: Some(ts),
+            sleep_end: None,
+            duration_min: None,
+            night_date: local_date(ts, tz_offset),
+        };
+        return insert_log(state, raw, "sleep", serde_json::to_value(data).unwrap()).await;
+    }
+
+    match open {
+        Some(log) => {
+            let start = log
+                .data
+                .get("sleep_start")
+                .and_then(|v| v.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.with_timezone(&Utc));
+            let duration = start.map(|s| ((ts - s).num_minutes()).max(0));
+            let patch = serde_json::json!({
+                "sleep_end": ts,
+                "duration_min": duration,
+                "night_date": local_date(ts, tz_offset),
+            });
+            let updated: Log = sqlx::query_as(&format!(
+                "UPDATE logs SET data = data || $2 WHERE id = $1 RETURNING {LOG_COLUMNS}"
+            ))
+            .bind(log.id)
+            .bind(patch)
+            .fetch_one(&state.pool)
+            .await?;
+            Ok(updated)
+        }
+        None => {
+            let data = SleepData {
+                sleep_start: None,
+                sleep_end: Some(ts),
+                duration_min: None,
+                night_date: local_date(ts, tz_offset),
+            };
+            insert_log(state, raw, "sleep", serde_json::to_value(data).unwrap()).await
+        }
+    }
+}
+
+/// Append one item to a trip's itinerary. Returns None when no trip exists.
+async fn append_itinerary(
+    state: &AppState,
+    destination: Option<&str>,
+    name: &str,
+    note: Option<String>,
+) -> Result<Option<Log>, AppError> {
+    let trip: Option<Log> = match destination {
+        Some(dest) => {
+            sqlx::query_as(&format!(
+                "SELECT {LOG_COLUMNS} FROM logs \
+                 WHERE parsed_type = 'trip' AND deleted_at IS NULL \
+                 AND data->>'destination' ILIKE $1 \
+                 ORDER BY created_at DESC LIMIT 1"
+            ))
+            .bind(format!("%{dest}%"))
+            .fetch_optional(&state.pool)
+            .await?
+        }
+        None => {
+            sqlx::query_as(&format!(
+                "SELECT {LOG_COLUMNS} FROM logs \
+                 WHERE parsed_type = 'trip' AND deleted_at IS NULL \
+                 ORDER BY (data->>'end_date' IS NULL) DESC, created_at DESC LIMIT 1"
+            ))
+            .fetch_optional(&state.pool)
+            .await?
+        }
+    };
+    let Some(trip) = trip else {
+        return Ok(None);
+    };
+
+    let entry = serde_json::to_value(ItineraryEntry { name: name.to_string(), note }).unwrap();
+    let updated: Log = sqlx::query_as(&format!(
+        "UPDATE logs SET data = jsonb_set(data, '{{itinerary}}', \
+            COALESCE(data->'itinerary', '[]'::jsonb) || $2) \
+         WHERE id = $1 RETURNING {LOG_COLUMNS}"
+    ))
+    .bind(trip.id)
+    .bind(entry)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(Some(updated))
+}
+
 pub async fn create_log(
     State(state): State<AppState>,
     Json(body): Json<CreateLog>,
@@ -105,7 +252,15 @@ pub async fn create_log(
     }
     let tz_offset = body.tz_offset_min.unwrap_or(0);
 
-    let actions = groq::parse(&state.http, &state.groq_key, &state.usda_key, raw).await?;
+    let now_local = Utc::now() - Duration::minutes(tz_offset as i64);
+    let mut context = format!(
+        "Current local datetime: {}.\n",
+        now_local.format("%Y-%m-%dT%H:%M")
+    );
+    context.push_str(&learning::context_block(&state).await);
+
+    let actions =
+        groq::parse(&state.http, &state.groq_key, &state.usda_key, raw, &context).await?;
 
     let mut logs = Vec::with_capacity(actions.len());
     let mut notices = Vec::new();
@@ -129,6 +284,24 @@ pub async fn create_log(
                         notices.push("Could not reach wger, try again.".to_string());
                     }
                 }
+            }
+            Action::Sleep { action, at } => {
+                let at_ts = parse_at(&at, tz_offset);
+                if action == "both" {
+                    handle_sleep(&state, raw, "start", at_ts, tz_offset).await?;
+                    logs.push(handle_sleep(&state, raw, "end", None, tz_offset).await?);
+                } else {
+                    logs.push(handle_sleep(&state, raw, &action, at_ts, tz_offset).await?);
+                }
+            }
+            Action::ItineraryItem { destination, name, note } => {
+                match append_itinerary(&state, destination.as_deref(), &name, note).await? {
+                    Some(log) => logs.push(log),
+                    None => notices.push("No trip found to add to.".to_string()),
+                }
+            }
+            Action::Learning(req) => {
+                logs.push(learning::apply(&state, raw, req).await?);
             }
         }
     }
@@ -244,6 +417,70 @@ pub async fn delete_log(
         return Err(AppError::NotFound);
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn list_sleep(State(state): State<AppState>) -> Result<Json<Vec<Log>>, AppError> {
+    let nights: Vec<Log> = sqlx::query_as(&format!(
+        "SELECT {LOG_COLUMNS} FROM logs \
+         WHERE parsed_type = 'sleep' AND deleted_at IS NULL \
+         ORDER BY data->>'night_date' DESC, created_at DESC LIMIT 120"
+    ))
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(nights))
+}
+
+pub async fn transcribe(
+    State(state): State<AppState>,
+    mut multipart: axum::extract::Multipart,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut audio: Option<(Vec<u8>, String, String)> = None;
+    while let Some(part) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("bad multipart: {e}")))?
+    {
+        if part.name() == Some("file") {
+            let content_type = part.content_type().unwrap_or("audio/webm").to_string();
+            let filename = part.file_name().unwrap_or("audio.webm").to_string();
+            let bytes = part
+                .bytes()
+                .await
+                .map_err(|e| AppError::BadRequest(format!("upload failed: {e}")))?;
+            audio = Some((bytes.to_vec(), content_type, filename));
+        }
+    }
+    let (bytes, content_type, filename) =
+        audio.ok_or_else(|| AppError::BadRequest("no audio file".into()))?;
+    if bytes.len() > 25 * 1024 * 1024 {
+        return Err(AppError::BadRequest("audio too large".into()));
+    }
+
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(filename)
+        .mime_str(&content_type)
+        .map_err(|e| AppError::BadRequest(format!("bad content type: {e}")))?;
+    let form = reqwest::multipart::Form::new()
+        .text("model", "whisper-large-v3-turbo")
+        .text("response_format", "json")
+        .part("file", part);
+
+    let resp = state
+        .http
+        .post("https://api.groq.com/openai/v1/audio/transcriptions")
+        .bearer_auth(&state.groq_key)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        tracing::warn!(%status, "transcription failed: {text}");
+        return Err(AppError::Internal(anyhow::anyhow!("transcription failed")));
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|e| AppError::Internal(e.into()))?;
+    Ok(Json(serde_json::json!({ "text": body["text"].as_str().unwrap_or("") })))
 }
 
 pub async fn health() -> &'static str {

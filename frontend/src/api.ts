@@ -2,10 +2,16 @@ import type {
   AlbumGroups,
   Category,
   CreateResponse,
+  Field,
+  FieldDetail,
+  FieldSummary,
   Log,
+  ProposedTopic,
   RankComparison,
   RankResponse,
+  Resource,
   Tier,
+  Topic,
 } from './types'
 
 const API = import.meta.env.VITE_API_URL ?? 'https://tejas-life-api.fly.dev'
@@ -84,17 +90,43 @@ export async function listSongs(status: string): Promise<Log[]> {
   return (await check(res)).json()
 }
 
-export async function rankAlbum(
-  id: string,
+export async function rankItem(
+  domain: string,
+  category: string | null,
+  itemId: string,
   tier: Tier,
   comparisons: RankComparison[],
 ): Promise<RankResponse> {
-  const res = await fetch(`${API}/api/albums/${id}/rank`, {
+  const res = await fetch(`${API}/api/rank`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ tier, comparisons }),
+    body: JSON.stringify({ domain, category, item_id: itemId, tier, comparisons }),
   })
   return (await check(res)).json()
+}
+
+export async function rankList(domain: string, category?: string): Promise<AlbumGroups> {
+  const params = new URLSearchParams({ domain })
+  if (category) params.set('category', category)
+  const res = await fetch(`${API}/api/rank/list?${params}`, { headers: authHeaders() })
+  return (await check(res)).json()
+}
+
+export async function listSleep(): Promise<Log[]> {
+  const res = await fetch(`${API}/api/sleep`, { headers: authHeaders() })
+  return (await check(res)).json()
+}
+
+export async function transcribe(blob: Blob): Promise<string> {
+  const form = new FormData()
+  const ext = blob.type.includes('mp4') ? 'm4a' : 'webm'
+  form.append('file', blob, `audio.${ext}`)
+  const res = await fetch(`${API}/api/transcribe`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form,
+  })
+  return (((await (await check(res)).json()) as { text: string }).text ?? '').trim()
 }
 
 export async function updateLog(
@@ -112,4 +144,84 @@ export async function updateLog(
 export async function deleteLog(id: string): Promise<void> {
   const res = await fetch(`${API}/api/logs/${id}`, { method: 'DELETE', headers: authHeaders() })
   await check(res)
+}
+
+const tz = () => String(new Date().getTimezoneOffset())
+
+export async function listFields(): Promise<FieldSummary[]> {
+  const res = await fetch(`${API}/api/fields?tz_offset_min=${tz()}`, { headers: authHeaders() })
+  return (await check(res)).json()
+}
+
+export async function getField(id: string): Promise<FieldDetail> {
+  const res = await fetch(`${API}/api/fields/${id}?tz_offset_min=${tz()}`, {
+    headers: authHeaders(),
+  })
+  return (await check(res)).json()
+}
+
+export async function createField(body: {
+  name: string
+  goal_text?: string
+  timeline_text?: string
+}): Promise<Field> {
+  const res = await fetch(`${API}/api/fields`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  })
+  return (await check(res)).json()
+}
+
+export async function addResource(
+  fieldId: string,
+  form: FormData,
+): Promise<Resource & { notice: string | null }> {
+  const res = await fetch(`${API}/api/fields/${fieldId}/resources`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form,
+  })
+  return (await check(res)).json()
+}
+
+export async function generatePlan(fieldId: string): Promise<ProposedTopic[]> {
+  const res = await fetch(`${API}/api/fields/${fieldId}/plan/generate`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+  return (await check(res)).json()
+}
+
+export async function savePlan(fieldId: string, topics: ProposedTopic[]): Promise<Topic[]> {
+  const res = await fetch(`${API}/api/fields/${fieldId}/plan`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(topics),
+  })
+  return (await check(res)).json()
+}
+
+export async function patchTopic(
+  id: string,
+  body: { status?: string; confidence?: number; name?: string },
+): Promise<Topic> {
+  const res = await fetch(`${API}/api/topics/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  })
+  return (await check(res)).json()
+}
+
+export async function patchResource(
+  id: string,
+  body: { current_unit?: number; total_units?: number; title?: string },
+): Promise<Resource> {
+  const res = await fetch(`${API}/api/resources/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  })
+  return (await check(res)).json()
 }

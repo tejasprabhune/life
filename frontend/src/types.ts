@@ -62,12 +62,136 @@ export interface WorkoutData {
   total_volume: number | null
 }
 
+export type PlaceCategory = 'coffee' | 'restaurant' | 'bar' | 'dessert' | 'other'
+
+export interface PlaceData {
+  name: string
+  category: PlaceCategory
+  order_text: string | null
+  thoughts: string | null
+  city: string | null
+  address: string | null
+  rating: number | null
+  rating_tier: Tier | null
+  rank_position: number | null
+}
+
+export interface ItineraryEntry {
+  name: string
+  note: string | null
+}
+
+export interface TripData {
+  destination: string
+  start_date: string | null
+  end_date: string | null
+  itinerary: ItineraryEntry[]
+  thoughts: string | null
+  rating: number | null
+  rating_tier: Tier | null
+  rank_position: number | null
+}
+
+export interface SleepData {
+  sleep_start: string | null
+  sleep_end: string | null
+  duration_min: number | null
+  night_date: string
+}
+
+export interface LearningData {
+  field_id: string | null
+  field_name: string | null
+  resource_id: string | null
+  resource_title: string | null
+  topic_id: string | null
+  topic_name: string | null
+  kind: 'study' | 'problems' | 'note'
+  resource_progress: number | null
+  problems_count: number | null
+  problems_type: string | null
+  note: string | null
+}
+
+export type ParsedType =
+  | 'nutrition'
+  | 'person'
+  | 'album'
+  | 'song'
+  | 'workout'
+  | 'learning'
+  | 'place'
+  | 'trip'
+  | 'sleep'
+
 export interface Log {
   id: string
   created_at: string
   raw_input: string
-  parsed_type: 'nutrition' | 'person' | 'album' | 'song' | 'workout'
-  data: NutritionData | PersonData | AlbumData | SongData | WorkoutData
+  parsed_type: ParsedType
+  data:
+    | NutritionData
+    | PersonData
+    | AlbumData
+    | SongData
+    | WorkoutData
+    | PlaceData
+    | TripData
+    | SleepData
+    | LearningData
+}
+
+export interface Field {
+  id: string
+  name: string
+  goal_text: string | null
+  timeline_text: string | null
+  created_at: string
+}
+
+export interface FieldSummary extends Field {
+  units_done: number
+  units_total: number
+  topics_done: number
+  topics_total: number
+  problems_theory: number
+  problems_implementation: number
+  streak: number
+}
+
+export interface Resource {
+  id: string
+  field_id: string
+  kind: 'pdf' | 'url' | 'manual'
+  title: string
+  uri: string | null
+  total_units: number | null
+  unit_label: string | null
+  current_unit: number
+  structure: string | null
+}
+
+export interface Topic {
+  id: string
+  field_id: string
+  name: string
+  ord: number
+  status: 'todo' | 'in_progress' | 'done'
+  confidence: number | null
+  source_resource_id: string | null
+}
+
+export interface FieldDetail extends Field {
+  resources: Resource[]
+  topics: Topic[]
+  problems_theory: number
+  problems_implementation: number
+  streak: number
+}
+
+export interface ProposedTopic {
+  name: string
+  source_resource_id: string | null
 }
 
 export interface CreateResponse {
@@ -79,8 +203,7 @@ export type Tier = 'loved' | 'fine' | 'disliked'
 
 export interface Opponent {
   id: string
-  artist: string
-  title: string
+  label: string
 }
 
 export interface RankComparison {
@@ -109,4 +232,15 @@ export type Entry =
   | { kind: 'log'; log: Log; justParsed: boolean }
   | { kind: 'pending'; pending: PendingLog }
 
-export type Category = 'all' | 'nutrition' | 'person' | 'music' | 'workout'
+export type Category =
+  | 'all'
+  | 'nutrition'
+  | 'person'
+  | 'music'
+  | 'workout'
+  | 'place'
+  | 'trip'
+  | 'learning'
+  | 'sleep'
+
+export type RankDomain = 'album' | 'place' | 'trip'
