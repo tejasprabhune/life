@@ -348,15 +348,21 @@ pub async fn list_logs(
         ));
     }
 
+    // Sleep entries belong to the night they close: they are bucketed by
+    // night_date (the wake date) and pinned above the day's other entries.
     let logs: Vec<Log> = sqlx::query_as(&format!(
         "SELECT {LOG_COLUMNS} FROM logs \
-         WHERE deleted_at IS NULL AND created_at >= $1 AND created_at < $2 \
+         WHERE deleted_at IS NULL \
+         AND (CASE WHEN parsed_type = 'sleep' AND data->>'night_date' IS NOT NULL \
+              THEN data->>'night_date' = $4 \
+              ELSE created_at >= $1 AND created_at < $2 END) \
          AND ($3 = 'all' OR parsed_type = $3) \
-         ORDER BY created_at DESC"
+         ORDER BY (parsed_type = 'sleep') DESC, created_at DESC"
     ))
     .bind(start)
     .bind(end)
     .bind(category)
+    .bind(local_date.to_string())
     .fetch_all(&state.pool)
     .await?;
 

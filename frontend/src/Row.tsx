@@ -31,6 +31,14 @@ function timeOf(iso: string): string {
     .replace(' ', '')
 }
 
+function rowTime(log: Log): string {
+  if (log.parsed_type === 'sleep') {
+    const end = (log.data as SleepData).sleep_end
+    if (end) return timeOf(end)
+  }
+  return timeOf(log.created_at)
+}
+
 const SONG_STATUS_LABEL: Record<SongStatus, string> = {
   loved: 'loved',
   to_revisit: 'revisit',
@@ -188,7 +196,7 @@ export function Row({ log, justParsed, expanded, onToggle, onChange, onDelete, o
   return (
     <div className={`row-wrap ${expanded ? 'open' : ''}`}>
       <div className={`row ${justParsed ? 'morph' : ''}`} onClick={onToggle}>
-        <span className="row-time">{timeOf(log.created_at)}</span>
+        <span className="row-time">{rowTime(log)}</span>
         <span className={`badge ${badge(log).kind}`}>{badge(log).label}</span>
         <span className="row-main">{summary(log)}</span>
         <span className="row-right">{rightSide(log, onRate)}</span>
