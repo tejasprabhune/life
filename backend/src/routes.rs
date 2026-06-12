@@ -349,7 +349,8 @@ pub async fn list_logs(
     }
 
     // Sleep entries belong to the night they close: they are bucketed by
-    // night_date (the wake date) and pinned above the day's other entries.
+    // night_date (the wake date) and pinned below the day's other entries,
+    // first in chronological order since the list renders newest first.
     let logs: Vec<Log> = sqlx::query_as(&format!(
         "SELECT {LOG_COLUMNS} FROM logs \
          WHERE deleted_at IS NULL \
@@ -357,7 +358,7 @@ pub async fn list_logs(
               THEN data->>'night_date' = $4 \
               ELSE created_at >= $1 AND created_at < $2 END) \
          AND ($3 = 'all' OR parsed_type = $3) \
-         ORDER BY (parsed_type = 'sleep') DESC, created_at DESC"
+         ORDER BY (parsed_type = 'sleep') ASC, created_at DESC"
     ))
     .bind(start)
     .bind(end)

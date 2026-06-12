@@ -145,8 +145,10 @@ function Home() {
     try {
       const { logs: created, notice: message } = await createLog(rawText)
       const createdIds = new Set(created.map((x) => x.id))
+      const sleeps = created.filter((x) => x.parsed_type === 'sleep')
+      const rest = created.filter((x) => x.parsed_type !== 'sleep')
       setPendings((p) => p.filter((x) => x.tempId !== id))
-      setLogs((l) => [...created, ...l.filter((x) => !createdIds.has(x.id))])
+      setLogs((l) => [...rest, ...l.filter((x) => !createdIds.has(x.id)), ...sleeps])
       if (message) {
         setNotice(message)
         setTimeout(() => setNotice(null), 6000)
